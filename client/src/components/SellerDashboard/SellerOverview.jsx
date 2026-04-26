@@ -20,6 +20,7 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import GroupIcon from '@mui/icons-material/Group';
 import AddIcon from '@mui/icons-material/Add';
 import ListAltIcon from '@mui/icons-material/ListAlt';
+import AlertTriangleIcon from '@mui/icons-material/Warning';
 
 const SellerOverview = () => {
   const navigate = useNavigate();
@@ -36,6 +37,7 @@ const SellerOverview = () => {
   const [revenueData, setRevenueData] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!seller?.seller_id) return;
@@ -56,6 +58,9 @@ const SellerOverview = () => {
         }
       } catch (error) {
         console.error("Failed to fetch dashboard data", error);
+        if (error.response?.status === 403) {
+          setError(error.response.data.message || "Your account has been restricted.");
+        }
       }
       setLoading(false);
     };
@@ -88,6 +93,18 @@ const SellerOverview = () => {
   return (
     <div className="flex flex-col gap-8 pb-10">
       
+      {error && (
+        <div className="bg-rose-50 border-2 border-rose-100 p-8 rounded-[2rem] flex items-center gap-6 animate-in slide-in-from-top duration-500 shadow-xl shadow-rose-100/50">
+          <div className="h-16 w-16 bg-rose-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
+            <AlertTriangleIcon fontSize="large" />
+          </div>
+          <div>
+            <h3 className="text-xl font-black text-rose-600 tracking-tight uppercase">Account Restricted</h3>
+            <p className="text-rose-700 font-bold mt-1 text-lg">{error}</p>
+          </div>
+        </div>
+      )}
+
       {/* Welcome Banner */}
       <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-8 md:p-10 rounded-[2.5rem] shadow-2xl shadow-blue-100 border border-white/10">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">

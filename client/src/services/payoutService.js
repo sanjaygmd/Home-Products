@@ -35,3 +35,30 @@ export const initiatePayout = async (payoutData) => {
         return error.response?.data || { success: false, message: "Network error" };
     }
 };
+
+export const requestPayout = async (requestData) => {
+    try {
+        const res = await api.post('/payout/request', requestData);
+        return res.data;
+    } catch (error) {
+        return error.response?.data || { success: false, message: "Network error" };
+    }
+};
+
+export const getAllPayouts = async () => {
+    try {
+        const res = await api.get('/payout/all');
+        return res.data;
+    } catch (error) {
+        return error.response?.data || { success: false, message: "Network error" };
+    }
+};
+
+export const updatePayoutStatus = async (payoutId, statusData) => {
+    try {
+        const res = await api.patch(`/payout/status/${payoutId}`, statusData);
+        return res.data;
+    } catch (error) {
+        return error.response?.data || { success: false, message: "Network error" };
+    }
+};

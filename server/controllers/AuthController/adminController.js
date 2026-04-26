@@ -1,6 +1,8 @@
 import { pool } from "../../configs/db.js";
 import { createAuthSession, invalidateSession } from "../../utils/authSession.js";
 import { logAudit } from "../../utils/auditLogger.js";
+import { processAutoPayout } from "../PayoutController.js";
+import { pushOrderToShiprocket } from "../ShipmentController.js";
 
 export const registerAdmin = async (req, res) => {
   try {
@@ -163,9 +165,9 @@ export const getAdminDashboardData = async (req, res) => {
         (SELECT COUNT(*) FROM orders WHERE is_deleted = false) as total_orders,
         (SELECT COUNT(*) FROM products WHERE deleted_at IS NULL) as total_products,
         (SELECT COUNT(*) FROM customers WHERE deleted_at IS NULL) as total_customers,
-        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE payment_status = 'Paid' AND order_status != 'Cancelled' AND is_deleted = false) as total_revenue,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE (payment_status = 'Paid' OR order_status = 'Delivered') AND order_status != 'Cancelled' AND is_deleted = false) as total_revenue,
         (SELECT COUNT(*) FROM orders WHERE placed_at >= CURRENT_DATE AND is_deleted = false) as today_orders,
-        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE placed_at >= CURRENT_DATE AND payment_status = 'Paid' AND order_status != 'Cancelled' AND is_deleted = false) as today_revenue,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE placed_at >= CURRENT_DATE AND (payment_status = 'Paid' OR order_status = 'Delivered') AND order_status != 'Cancelled' AND is_deleted = false) as today_revenue,
         (SELECT COUNT(*) FROM products WHERE created_at >= CURRENT_DATE AND deleted_at IS NULL) as today_new_products,
         (SELECT COUNT(*) FROM customers WHERE created_at >= CURRENT_DATE AND deleted_at IS NULL) as today_new_customers
     `;
@@ -177,13 +179,13 @@ export const getAdminDashboardData = async (req, res) => {
       SELECT 
         TO_CHAR(m.month, 'Mon') as month,
         COALESCE(SUM(o.total_amount), 0) as revenue,
-        COALESCE((SELECT SUM(commission_amount) FROM seller_commissions sc JOIN orders o2 ON sc.order_id = o2.order_id WHERE date_trunc('month', o2.placed_at) = m.month AND o2.payment_status = 'Paid' AND o2.order_status != 'Cancelled'), 0) as profit,
+        COALESCE((SELECT SUM(commission_amount) FROM seller_commissions sc JOIN orders o2 ON sc.order_id = o2.order_id WHERE date_trunc('month', o2.placed_at) = m.month AND (o2.payment_status = 'Paid' OR o2.order_status = 'Delivered') AND o2.order_status != 'Cancelled'), 0) as profit,
         COUNT(o.order_id) as orders
       FROM (
         SELECT date_trunc('month', CURRENT_DATE) - (i || ' month')::interval as month
         FROM generate_series(0, 5) i
       ) m
-      LEFT JOIN orders o ON date_trunc('month', o.placed_at) = m.month AND o.payment_status = 'Paid' AND o.order_status != 'Cancelled' AND o.is_deleted = false
+      LEFT JOIN orders o ON date_trunc('month', o.placed_at) = m.month AND (o.payment_status = 'Paid' OR o.order_status = 'Delivered') AND o.order_status != 'Cancelled' AND o.is_deleted = false
       GROUP BY m.month
       ORDER BY m.month ASC
     `;
@@ -335,14 +337,17 @@ export const getSellersData = async (req, res) => {
         s.phone,
         s.is_verified,
         s.is_active,
+        s.block_reason,
         s.created_at as "joinDate",
         (SELECT COUNT(*) FROM products WHERE seller_id = s.seller_id AND deleted_at IS NULL) as products,
         (SELECT COUNT(*) FROM order_sellers WHERE seller_id = s.seller_id) as orders,
-        (SELECT COALESCE(SUM(p.price * oi.quantity), 0) 
-         FROM order_items oi 
-         JOIN products p ON oi.product_id = p.product_id 
-         JOIN order_sellers os ON os.order_id = oi.order_id
-         WHERE os.seller_id = s.seller_id) as revenue,
+        (SELECT COALESCE(SUM(os.seller_subtotal), 0) 
+         FROM order_sellers os
+         JOIN orders o ON o.order_id = os.order_id
+         WHERE os.seller_id = s.seller_id 
+           AND (o.payment_status = 'Paid' OR o.order_status = 'Delivered') 
+           AND o.order_status != 'Cancelled' 
+           AND o.is_deleted = false) as revenue,
         COALESCE((SELECT AVG(rating) FROM products WHERE seller_id = s.seller_id), 0) as rating
       FROM sellers s
       ORDER BY s.created_at DESC
@@ -356,7 +361,8 @@ export const getSellersData = async (req, res) => {
         status: s.is_active ? (s.is_verified ? 'Active' : 'Pending KYC') : 'Suspended',
         revenue: `₹${Number(s.revenue).toLocaleString('en-IN')}`,
         rating: Number(Number(s.rating).toFixed(1)),
-        joinDate: new Date(s.joinDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+        joinDate: new Date(s.joinDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }),
+        block_reason: s.block_reason
       }))
     });
   } catch (error) {
@@ -370,51 +376,83 @@ export const getSellersData = async (req, res) => {
  */
 export const getFinanceData = async (req, res) => {
   try {
-    // 1. Revenue & Profit Summary
+    const { range = 'monthly' } = req.query;
+
+    let rangeFilter = "";
+    if (range === 'monthly') {
+      rangeFilter = "AND created_at >= CURRENT_DATE - interval '1 month'";
+    } else if (range === 'annual') {
+      rangeFilter = "AND created_at >= CURRENT_DATE - interval '1 year'";
+    }
+
+    // 1. Revenue & Profit Summary (Contextual to range)
     const summaryQuery = `
       SELECT 
-        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE payment_status = 'Paid' AND order_status != 'Cancelled' AND is_deleted = false) as gross_revenue,
-        (SELECT COALESCE(SUM(commission_amount), 0) FROM seller_commissions WHERE status != 'Cancelled') as platform_commission,
-        (SELECT COALESCE(SUM(commission_amount), 0) FROM seller_commissions WHERE status != 'Cancelled') as net_profit
+        COALESCE(SUM(CASE WHEN transaction_type = 'order_payment' THEN amount ELSE 0 END), 0) as gross_revenue,
+        COALESCE(SUM(CASE WHEN transaction_type = 'order_payment' THEN amount * 0.10 ELSE 0 END), 0) as platform_commission
+      FROM finance_transactions
+      WHERE 1=1 ${rangeFilter}
     `;
     const summaryResult = await pool.query(summaryQuery);
+    const gross = parseFloat(summaryResult.rows[0].gross_revenue);
+    const comm = parseFloat(summaryResult.rows[0].platform_commission);
 
-    // 2. Monthly Revenue/Cost/Profit
-    const monthlyQuery = `
-      SELECT 
-        TO_CHAR(m.month, 'Mon') as month,
-        COALESCE(SUM(o.total_amount), 0) as revenue,
-        COALESCE(SUM(os.seller_subtotal), 0) as costs,
-        COALESCE((SELECT SUM(commission_amount) FROM seller_commissions sc JOIN orders o2 ON sc.order_id = o2.order_id WHERE date_trunc('month', o2.placed_at) = m.month AND o2.order_status != 'Cancelled'), 0) as profit
-      FROM (
-        SELECT date_trunc('month', CURRENT_DATE) - (i || ' month')::interval as month
-        FROM generate_series(0, 5) i
-      ) m
-      LEFT JOIN orders o ON date_trunc('month', o.placed_at) = m.month AND o.payment_status = 'Paid' AND o.order_status != 'Cancelled' AND o.is_deleted = false
-      LEFT JOIN order_sellers os ON o.order_id = os.order_id
-      GROUP BY m.month
-      ORDER BY m.month ASC
-    `;
-    const monthlyResult = await pool.query(monthlyQuery);
+    // 2. Trend Data (Monthly or Annual)
+    let trendQuery = '';
+    if (range === 'annual') {
+      trendQuery = `
+        SELECT 
+          y.year::text as name,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'order_payment' THEN ft.amount ELSE 0 END), 0) as revenue,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'payout' THEN ft.amount ELSE 0 END), 0) as costs,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'order_payment' THEN ft.amount * 0.10 ELSE 0 END), 0) as profit
+        FROM (
+          SELECT EXTRACT(YEAR FROM CURRENT_DATE) - i as year
+          FROM generate_series(0, 4) i
+        ) y
+        LEFT JOIN finance_transactions ft ON EXTRACT(YEAR FROM ft.created_at) = y.year
+        GROUP BY y.year
+        ORDER BY y.year ASC
+      `;
+    } else {
+      trendQuery = `
+        SELECT 
+          TO_CHAR(m.month, 'Mon') as name,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'order_payment' THEN ft.amount ELSE 0 END), 0) as revenue,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'payout' THEN ft.amount ELSE 0 END), 0) as costs,
+          COALESCE(SUM(CASE WHEN ft.transaction_type = 'order_payment' THEN ft.amount * 0.10 ELSE 0 END), 0) as profit
+        FROM (
+          SELECT date_trunc('month', CURRENT_DATE) - (i || ' month')::interval as month
+          FROM generate_series(0, 5) i
+        ) m
+        LEFT JOIN finance_transactions ft ON date_trunc('month', ft.created_at) = m.month
+        GROUP BY m.month
+        ORDER BY m.month ASC
+      `;
+    }
+    const trendResult = await pool.query(trendQuery);
 
-    // 3. Payouts List (Sellers with pending commissions)
+    // 3. Payouts Ledger
     const payoutsQuery = `
       SELECT 
+        p.payout_id as id,
         s.store_name as name,
-        COALESCE(SUM(sc.seller_earnings), 0) as amount,
-        COALESCE(SUM(sc.sale_amount), 0) as revenue,
-        'Pending' as status
-      FROM sellers s
-      JOIN seller_commissions sc ON s.seller_id = sc.seller_id
-      WHERE LOWER(sc.status) = 'pending'
-      GROUP BY s.store_name
-      LIMIT 10
+        p.amount,
+        p.status,
+        p.created_at as date,
+        COALESCE((SELECT SUM(sale_amount) FROM seller_commissions WHERE payout_id = p.payout_id), 0) as revenue
+      FROM seller_payouts p
+      JOIN sellers s ON p.seller_id = s.seller_id
+      ORDER BY p.created_at DESC
+      LIMIT 20
     `;
+    const payoutsResult = await pool.query(payoutsQuery);
+
     // 4. Expense Distribution
     const expenseQuery = `
-      SELECT 'Seller Payouts' as name, COALESCE(SUM(seller_earnings), 0) as value FROM seller_commissions WHERE status = 'Completed'
+      SELECT 'Seller Payouts' as name, COALESCE(SUM(amount), 0) as value FROM finance_transactions WHERE transaction_type = 'payout'
       UNION ALL
-      SELECT 'Platform Tax' as name, COALESCE(SUM(commission_amount) * 0.18, 0) as value FROM seller_commissions
+      SELECT 'Platform Tax' as name, COALESCE(SUM(amount) * 0.10 * 0.18, 0) as value FROM finance_transactions WHERE transaction_type = 'order_payment'
       UNION ALL
       SELECT 'Shipping' as name, COUNT(*) * 50 as value FROM orders WHERE order_status = 'Shipped' OR order_status = 'Delivered'
       UNION ALL
@@ -422,20 +460,23 @@ export const getFinanceData = async (req, res) => {
     `;
     const expenseResult = await pool.query(expenseQuery);
 
-    // 5. Recent Transactions
+    // 5. Recent Transactions (Real Ledger)
     const txnsQuery = `
       SELECT 
-        'TXN-' || order_id as id,
-        'Order Payment' as type,
-        c.full_name as seller,
-        o.total_amount as amount,
-        TO_CHAR(o.placed_at, 'DD Mon YYYY') as date,
+        ft.finance_transactions_id as id,
+        ft.transaction_type as type,
+        CASE 
+          WHEN ft.transaction_type = 'payout' THEN s.store_name 
+          ELSE 'Order Sale' 
+        END as seller,
+        ft.amount,
+        TO_CHAR(ft.created_at, 'DD Mon YYYY') as date,
         'Completed' as status
-      FROM orders o
-      JOIN customers c ON o.customer_id = c.customer_id
-      WHERE o.is_deleted = false
-      ORDER BY o.placed_at DESC
-      LIMIT 10
+      FROM finance_transactions ft
+      LEFT JOIN seller_payouts sp ON ft.seller_payout_id = sp.payout_id
+      LEFT JOIN sellers s ON sp.seller_id = s.seller_id
+      ORDER BY ft.created_at DESC
+      LIMIT 15
     `;
     const txnsResult = await pool.query(txnsQuery);
 
@@ -443,18 +484,17 @@ export const getFinanceData = async (req, res) => {
       success: true,
       data: {
         summary: {
-          gross_revenue: Number(summaryResult.rows[0].gross_revenue),
-          platform_commission: Number(summaryResult.rows[0].platform_commission),
-          net_profit: Number(summaryResult.rows[0].net_profit)
+          gross_revenue: gross,
+          platform_commission: comm,
+          net_profit: comm // In this simplified model, net profit = platform commission
         },
-        monthlyPL: monthlyResult.rows.map(r => ({
+        monthlyPL: trendResult.rows.map(r => ({
           ...r,
           revenue: Number(r.revenue),
           costs: Number(r.costs),
           profit: Number(r.profit)
         })),
-        payouts: payoutsResult.rows.map((p, i) => ({
-          id: i + 1,
+        payouts: payoutsResult.rows.map((p) => ({
           ...p,
           amount: Number(p.amount),
           revenue: Number(p.revenue)
@@ -480,85 +520,153 @@ export const getFinanceData = async (req, res) => {
  */
 export const getAnalyticsData = async (req, res) => {
   try {
-    const { range = 'all' } = req.query;
+    const { range = 'daily' } = req.query;
 
     let rangeFilter = '';
-    if (range === 'daily') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 day'";
-    else if (range === 'weekly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 week'";
-    else if (range === 'monthly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 month'";
-    else if (range === 'quarterly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '3 month'";
-    else if (range === 'half_yearly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '6 month'";
-    else if (range === 'annual') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 year'";
+    const r = range.toLowerCase();
+    if (r === 'daily') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '2 days'"; // Include Yesterday/Today
+    else if (r === 'weekly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 week'";
+    else if (r === 'monthly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 month'";
+    else if (r === 'quarterly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '3 month'";
+    else if (r === 'half_yearly' || r === 'halfyearly' || r === 'half-yearly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '6 month'";
+    else if (r === 'annual' || r === 'yearly') rangeFilter = "AND o.placed_at >= CURRENT_DATE - interval '1 year'";
 
     // 1. Sales by Category
     const categoryResult = await pool.query(`
-      SELECT p.room as category, SUM(oi.quantity * p.price) as revenue, COUNT(oi.order_item_id) as sales
+      SELECT p.room as category, SUM(oi.quantity * oi.unit_price) as revenue, COUNT(oi.order_item_id) as sales
       FROM order_items oi
       JOIN products p ON oi.product_id = p.product_id
       JOIN orders o ON oi.order_id = o.order_id
-      WHERE o.order_status != 'Cancelled' AND o.is_deleted = false ${rangeFilter}
+      WHERE (o.payment_status = 'Paid' OR o.order_status = 'Delivered') AND o.order_status != 'Cancelled' AND o.is_deleted = false ${rangeFilter}
       GROUP BY p.room ORDER BY revenue DESC
     `);
 
     // 2. Top Performing Products
     const productsResult = await pool.query(`
-      SELECT p.name, s.store_name as seller, SUM(oi.quantity) as qty, SUM(oi.quantity * p.price) as revenue
+      SELECT p.name, s.store_name as seller, SUM(oi.quantity) as qty, SUM(oi.quantity * oi.unit_price) as revenue
       FROM order_items oi
       JOIN products p ON oi.product_id = p.product_id
       JOIN sellers s ON p.seller_id = s.seller_id
       JOIN orders o ON oi.order_id = o.order_id
-      WHERE o.order_status != 'Cancelled' AND o.is_deleted = false ${rangeFilter}
+      WHERE (o.payment_status = 'Paid' OR o.order_status = 'Delivered') AND o.order_status != 'Cancelled' AND o.is_deleted = false ${rangeFilter}
       GROUP BY p.name, s.store_name ORDER BY revenue DESC LIMIT 10
     `);
 
-    // 3. Summary Stats
+    // 3. Summary Stats (Recalculated for accuracy)
     const summaryResult = await pool.query(`
       SELECT
         COUNT(*) as total_orders,
-        COALESCE(SUM(o.total_amount), 0) as total_revenue,
-        COALESCE(SUM(oi_count.item_count), 0) as total_items_sold
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'Paid' OR o.order_status = 'Delivered') AND o.order_status != 'Cancelled' THEN o.total_amount ELSE 0 END), 0) as total_revenue,
+        COALESCE(SUM(CASE WHEN o.order_status = 'Delivered' THEN oi_count.item_count ELSE 0 END), 0) as total_items_sold
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(quantity) as item_count FROM order_items GROUP BY order_id
       ) oi_count ON o.order_id = oi_count.order_id
-      WHERE o.order_status != 'Cancelled' AND o.is_deleted = false ${rangeFilter}
+      WHERE o.is_deleted = false ${rangeFilter}
     `);
 
     // 4. Payment Status Breakdown
     const paymentStatsResult = await pool.query(`
       SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE LOWER(payment_status) = 'paid' AND LOWER(order_status) != 'cancelled') as success,
-        COUNT(*) FILTER (WHERE LOWER(order_status) = 'cancelled') as cancelled,
-        COUNT(*) FILTER (WHERE LOWER(order_status) = 'pending' OR LOWER(order_status) = 'processing') as pending
+        COUNT(*) FILTER (WHERE (payment_status = 'Paid' OR order_status = 'Delivered') AND order_status != 'Cancelled') as success,
+        COUNT(*) FILTER (WHERE order_status = 'Cancelled') as cancelled,
+        COUNT(*) FILTER (WHERE order_status != 'Cancelled' AND payment_status != 'Paid' AND order_status != 'Delivered') as pending
       FROM orders WHERE is_deleted = false
     `);
 
-    // 5. Returns
+    // 6. Trend Configuration
+    let trendStep = 'day';
+    let trendCount = 14;
+    let trendFmt = 'DD Mon';
+    let trendOffset = 0;
+
+    if (r === 'daily') { trendStep = 'day'; trendCount = 13; trendFmt = 'DD Mon'; trendOffset = -1; }
+    else if (r === 'weekly') { trendStep = 'week'; trendCount = 11; trendFmt = 'W-WW'; trendOffset = -1; }
+    else if (r === 'monthly') { trendStep = 'month'; trendCount = 11; trendFmt = 'Mon YY'; }
+    else if (r === 'quarterly') { trendStep = 'month'; trendCount = 11; trendFmt = 'Mon YY'; }
+    else if (r === 'halfyearly' || r === 'half_yearly' || r === 'half-yearly') { trendStep = 'month'; trendCount = 11; trendFmt = 'Mon YY'; }
+    else if (r === 'annual' || r === 'yearly') { trendStep = 'year'; trendCount = 4; trendFmt = 'YYYY'; }
+    else if (r === 'all') { trendStep = 'month'; trendCount = 59; trendFmt = 'Mon YY'; }
+
+    // 7. Dynamic Trend (Optimized Profit Calc)
+    const trendResult = await pool.query(`
+      SELECT 
+        TO_CHAR(t.date, '${trendFmt}') as name,
+        COALESCE(SUM(o.total_amount), 0) as revenue,
+        COALESCE(SUM(os.seller_subtotal), 0) as costs,
+        COUNT(o.order_id) as orders,
+        COALESCE(SUM(sc.commission_amount), 0) as profit
+      FROM (
+        SELECT date_trunc('${trendStep}', NOW()) - (i || ' ${trendStep}')::interval as date
+        FROM generate_series(${trendOffset}, ${trendCount} + ${trendOffset}) i
+      ) t
+      LEFT JOIN orders o ON date_trunc('${trendStep}', o.placed_at) = t.date 
+        AND (o.payment_status = 'Paid' OR o.order_status = 'Delivered') 
+        AND o.order_status != 'Cancelled' 
+        AND o.is_deleted = false
+      LEFT JOIN order_sellers os ON o.order_id = os.order_id
+      LEFT JOIN seller_commissions sc ON o.order_id = sc.order_id
+      GROUP BY t.date
+      ORDER BY t.date ASC
+    `);
+
+    // 7. Recent Returns
     const returnsResult = await pool.query(`
       SELECT o.order_id as orderId, c.full_name as customer, o.total_amount as amount, o.order_status as status, o.placed_at as date
       FROM orders o JOIN customers c ON o.customer_id = c.customer_id
       WHERE o.order_status = 'Cancelled' AND o.is_deleted = false LIMIT 10
     `);
 
+    // 8. Category Distribution (Product Count)
+    const categoryDistributionResult = await pool.query(`
+      SELECT room as name, COUNT(*) as value
+      FROM products WHERE deleted_at IS NULL
+      GROUP BY room ORDER BY value DESC
+    `);
+    
+    // 9. Order Status Distribution
+    const statusDistributionResult = await pool.query(`
+      SELECT order_status as name, COUNT(*) as value
+      FROM orders WHERE is_deleted = false
+      GROUP BY order_status
+    `);
+
     return res.status(200).json({
       success: true,
       data: {
-        categorySales: categoryResult.rows.map(r => ({
-          ...r,
-          revenue: Number(r.revenue),
-          sales: Number(r.sales)
-        })),
-        topProducts: productsResult.rows.map(r => ({
-          ...r,
-          qty: Number(r.qty),
-          revenue: Number(r.revenue)
-        })),
         summary: {
           total_orders: Number(summaryResult.rows[0].total_orders),
           total_revenue: Number(summaryResult.rows[0].total_revenue),
           total_items_sold: Number(summaryResult.rows[0].total_items_sold)
         },
+        trend: trendResult.rows.map(r => ({ 
+          ...r, 
+          revenue: Number(r.revenue),
+          costs: Number(r.costs),
+          profit: Number(r.profit),
+          orders: Number(r.orders)
+        })),
+        categorySales: categoryResult.rows.map(r => ({
+          ...r,
+          revenue: Number(r.revenue),
+          sales: Number(r.sales)
+        })),
+        categoryDistribution: categoryDistributionResult.rows.map(r => ({ ...r, value: Number(r.value) })),
+        statusDistribution: statusDistributionResult.rows.map(r => ({ ...r, value: Number(r.value) })),
+        recentDeliveries: (await pool.query(`
+          SELECT d.*, o.total_amount, a.full_name as customer_name
+          FROM deliveries d
+          JOIN orders o ON d.order_id = o.order_id
+          JOIN addresses a ON o.address_id = a.address_id
+          ORDER BY d.updated_at DESC
+          LIMIT 10
+        `)).rows,
+        topProducts: productsResult.rows.map(r => ({
+          ...r,
+          qty: Number(r.qty),
+          revenue: Number(r.revenue)
+        })),
         paymentStats: {
           total: Number(paymentStatsResult.rows[0].total),
           success: Number(paymentStatsResult.rows[0].success),
@@ -605,24 +713,15 @@ export const getAllPayments = async (req, res) => {
     const statsQuery = `
       SELECT 
         COALESCE(SUM(total_amount) FILTER (
-          WHERE order_status != 'Cancelled' AND (
-            (payment_method != 'cod' AND cod_fee = 0) OR 
-            (order_status = 'Delivered' OR payment_status = 'Paid')
-          )
+          WHERE order_status != 'Cancelled' AND (payment_status = 'Paid' OR order_status = 'Delivered')
         ), 0) as total,
         COUNT(CASE 
-          WHEN order_status != 'Cancelled' AND (
-            (payment_method != 'cod' AND cod_fee = 0) OR 
-            (order_status = 'Delivered' OR payment_status = 'Paid')
-          ) THEN 1 
+          WHEN order_status != 'Cancelled' AND (payment_status = 'Paid' OR order_status = 'Delivered') THEN 1 
           ELSE NULL 
         END) as success,
         COUNT(CASE WHEN order_status = 'Cancelled' THEN 1 END) as cancelled,
         COUNT(CASE 
-          WHEN order_status != 'Cancelled' AND (
-            (payment_method = 'cod' OR cod_fee > 0) AND 
-            (order_status != 'Delivered' AND payment_status != 'Paid')
-          ) THEN 1 
+          WHEN order_status != 'Cancelled' AND payment_status != 'Paid' AND order_status != 'Delivered' THEN 1 
           ELSE NULL 
         END) as pending
       FROM orders
@@ -647,20 +746,10 @@ export const getAllPayments = async (req, res) => {
         // Determine Payment Status
         if (r.status === 'Cancelled') {
           paymentStatus = 'Cancelled';
-        } else if (isCOD) {
-          // COD: Success only if Delivered or Paid, otherwise Pending
-          if (r.status === 'Delivered' || r.payment_status === 'Paid') {
-            paymentStatus = 'Success';
-          } else {
-            paymentStatus = 'Pending';
-          }
+        } else if (r.payment_status === 'Paid' || r.status === 'Delivered') {
+          paymentStatus = 'Success';
         } else {
-          // Online: Success by default unless cancelled
-          if (r.status === 'Cancelled') {
-            paymentStatus = 'Cancelled';
-          } else {
-            paymentStatus = 'Success';
-          }
+          paymentStatus = 'Pending';
         }
 
         return {
@@ -778,7 +867,8 @@ export const getAllCustomers = async (req, res) => {
         email,
         phone,
         created_at,
-        is_active
+        is_active,
+        block_reason
       FROM customers
       WHERE deleted_at IS NULL
       ORDER BY created_at DESC
@@ -792,25 +882,51 @@ export const getAllCustomers = async (req, res) => {
 };
 
 /**
- * Toggle Customer Active Status
+ * Toggle Customer Active Status with Reason
  */
 export const toggleCustomerStatus = async (req, res) => {
   const { id } = req.params;
+  const { is_active, block_reason } = req.body;
   try {
-    const checkQuery = `SELECT is_active FROM customers WHERE customer_id = $1`;
-    const checkResult = await pool.query(checkQuery, [id]);
+    const updateQuery = `UPDATE customers SET is_active = $1, block_reason = $2 WHERE customer_id = $3 RETURNING is_active, block_reason`;
+    const result = await pool.query(updateQuery, [is_active, is_active ? null : block_reason, id]);
 
-    if (checkResult.rowCount === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ success: false, message: "Customer not found" });
     }
 
-    const newStatus = !checkResult.rows[0].is_active;
-    const updateQuery = `UPDATE customers SET is_active = $1 WHERE customer_id = $2 RETURNING is_active`;
-    await pool.query(updateQuery, [newStatus, id]);
-
-    return res.status(200).json({ success: true, is_active: newStatus });
+    return res.status(200).json({ 
+      success: true, 
+      is_active: result.rows[0].is_active,
+      block_reason: result.rows[0].block_reason 
+    });
   } catch (error) {
     console.error("TOGGLE CUSTOMER STATUS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update status" });
+  }
+};
+
+/**
+ * Toggle Seller Active Status with Reason
+ */
+export const toggleSellerStatus = async (req, res) => {
+  const { id } = req.params;
+  const { is_active, block_reason } = req.body;
+  try {
+    const updateQuery = `UPDATE sellers SET is_active = $1, block_reason = $2 WHERE seller_id = $3 RETURNING is_active, block_reason`;
+    const result = await pool.query(updateQuery, [is_active, is_active ? null : block_reason, id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: "Seller not found" });
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      is_active: result.rows[0].is_active,
+      block_reason: result.rows[0].block_reason 
+    });
+  } catch (error) {
+    console.error("TOGGLE SELLER STATUS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to update status" });
   }
 };
@@ -885,5 +1001,242 @@ export const changeAdminPassword = async (req, res) => {
   } catch (error) {
     console.error("CHANGE PASSWORD ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to update password" });
+  }
+};
+
+/**
+ * Bulk Update Orders
+ */
+export const bulkUpdateOrders = async (req, res) => {
+  try {
+    const { orderIds, status, courier } = req.body;
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ success: false, message: "No orders selected" });
+    }
+
+    let query = `UPDATE orders SET updated_at = NOW()`;
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      query += `, order_status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (courier) {
+      query += `, courier = $${paramIndex++}`;
+      params.push(courier);
+    }
+
+    query += ` WHERE order_id = ANY($${paramIndex}) RETURNING order_id`;
+    params.push(orderIds);
+
+    const result = await pool.query(query, params);
+
+    // Sync with deliveries table for bulk actions
+    if (status) {
+        await pool.query(`
+            INSERT INTO deliveries (delivery_id, order_id, courier_name, awb_code, shipping_status, dispatched_at, delivered_at, updated_at, created_at)
+            SELECT gen_random_uuid(), id, $1, 'N/A', $2::varchar, 
+                CASE WHEN $2::varchar = 'Shipped' OR $2::varchar = 'Delivered' THEN NOW() ELSE NULL END,
+                CASE WHEN $2::varchar = 'Delivered' THEN NOW() ELSE NULL END,
+                NOW(), NOW()
+            FROM unnest($3::uuid[]) as id
+            ON CONFLICT (order_id) DO UPDATE SET
+                courier_name = EXCLUDED.courier_name,
+                shipping_status = EXCLUDED.shipping_status,
+                dispatched_at = COALESCE(deliveries.dispatched_at, EXCLUDED.dispatched_at),
+                delivered_at = COALESCE(deliveries.delivered_at, EXCLUDED.delivered_at),
+                updated_at = NOW()
+        `, [courier || 'Bulk Update', status, orderIds]);
+    }
+
+    // Log the bulk action
+    await logAudit({
+      admin_id: req.user.id,
+      action: 'BULK_UPDATE',
+      table_name: 'orders',
+      record_id: null,
+      new_values: { updated_count: result.rowCount, orderIds },
+      req
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully updated ${result.rowCount} orders`,
+      updatedCount: result.rowCount
+    });
+
+  } catch (error) {
+    console.error("BULK UPDATE ORDERS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error during bulk update" });
+  }
+};
+
+// Export yearly transactions as a professional bank statement CSV
+export const exportFinanceReport = async (req, res) => {
+  const { year = new Date().getFullYear() } = req.query;
+  try {
+    const query = `
+      SELECT 
+        ft.created_at,
+        ft.transaction_type,
+        ft.amount,
+        o.order_id as order_ref,
+        sp.payout_id as payout_ref,
+        sp.transaction_ref as utr,
+        s.store_name,
+        o.payment_method
+      FROM finance_transactions ft
+      LEFT JOIN orders o ON ft.order_id = o.order_id
+      LEFT JOIN seller_payouts sp ON ft.seller_payout_id = sp.payout_id
+      LEFT JOIN sellers s ON sp.seller_id = s.seller_id
+      WHERE EXTRACT(YEAR FROM ft.created_at) = $1
+      ORDER BY ft.created_at ASC
+    `;
+    const result = await pool.query(query, [year]);
+
+    if (result.rows.length === 0) {
+      return res.status(200).send("Date,Description,Reference,Debit (₹),Credit (₹),Balance (₹)\nNo transactions found for this year.");
+    }
+
+    const csvRows = [
+      `FINANCIAL STATEMENT - YEAR ${year}`,
+      `Generated on: ${new Date().toLocaleString()}`,
+      "",
+      "Date,Description,Reference,Debit (₹),Credit (₹),Balance (₹)"
+    ];
+
+    let runningBalance = 0;
+
+    for (const row of result.rows) {
+      const date = new Date(row.created_at).toLocaleString('en-IN', { 
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+      }).replace(',', '');
+      
+      let description = "";
+      let reference = "";
+      let debit = "";
+      let credit = "";
+
+      if (row.transaction_type === 'payout') {
+        description = `Payout to ${row.store_name || 'Seller'}`;
+        reference = row.utr || row.payout_ref || 'N/A';
+        debit = parseFloat(row.amount).toFixed(2);
+        runningBalance -= parseFloat(row.amount);
+      } else {
+        description = `Order Payment - ${row.payment_method || 'Online'}`;
+        reference = row.order_ref || 'N/A';
+        credit = parseFloat(row.amount).toFixed(2);
+        runningBalance += parseFloat(row.amount);
+      }
+
+      const line = [
+        `"${date}"`,
+        `"${description}"`,
+        `"${reference}"`,
+        debit ? `"${debit}"` : "",
+        credit ? `"${credit}"` : "",
+        `"${runningBalance.toFixed(2)}"`
+      ];
+      csvRows.push(line.join(','));
+    }
+
+    const csvString = csvRows.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=Bank_Statement_${year}.csv`);
+    res.status(200).send(csvString);
+
+  } catch (error) {
+    console.error("EXPORT FINANCE REPORT ERROR:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+/**
+ * Smart Auto-Dispatch All Pending Orders
+ */
+export const autoDispatchOrders = async (req, res) => {
+  try {
+    // 1. Find all 'Processing' orders
+    const pendingOrders = await pool.query("SELECT order_id FROM orders WHERE order_status = 'Processing' AND is_deleted = false");
+    
+    if (pendingOrders.rows.length === 0) {
+      return res.status(200).json({ success: true, message: "No pending orders to dispatch", count: 0 });
+    }
+
+    const orderIds = pendingOrders.rows.map(o => o.order_id);
+    const results = {
+      success: 0,
+      failed: 0,
+      details: []
+    };
+
+    // 2. Process each order through Intelligent Auto-Pilot
+    for (const orderId of orderIds) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        
+        // Intelligent Push (Order -> Serviceability -> AWB -> Pickup)
+        const srData = await pushOrderToShiprocket(orderId, client);
+
+        // Update local order status
+        await client.query(`
+          UPDATE orders 
+          SET 
+            order_status = 'Shipped', 
+            courier = $1, 
+            tracking_id = $2,
+            updated_at = NOW() 
+          WHERE order_id = $3
+        `, [srData.courier, srData.awb_code, orderId]);
+
+        // Sync with deliveries table
+        await client.query(`
+          INSERT INTO deliveries (delivery_id, order_id, courier_name, awb_code, shipping_status, dispatched_at, updated_at, created_at)
+          VALUES (gen_random_uuid(), $1, $2, $3, 'Shipped', NOW(), NOW(), NOW())
+          ON CONFLICT (order_id) DO UPDATE SET
+            courier_name = EXCLUDED.courier_name,
+            awb_code = EXCLUDED.awb_code,
+            shipping_status = EXCLUDED.shipping_status,
+            dispatched_at = NOW(),
+            updated_at = NOW()
+        `, [orderId, srData.courier, srData.awb_code]);
+
+        await client.query('COMMIT');
+        results.success++;
+        results.details.push({ orderId, status: 'Success', courier: srData.courier });
+
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`Auto-Dispatch Error for Order ${orderId}:`, err.message);
+        results.failed++;
+        results.details.push({ orderId, status: 'Failed', error: err.message });
+      } finally {
+        client.release();
+      }
+    }
+
+    // 3. Log the bulk action
+    await logAudit({
+      admin_id: req.user.id,
+      action: 'AUTO_DISPATCH_SHIPROCKET',
+      table_name: 'orders',
+      record_id: `Processed ${orderIds.length} orders`,
+      details: results,
+      req
+    });
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `Intelligent Auto-Pilot completed: ${results.success} success, ${results.failed} failed.`,
+      summary: results
+    });
+
+  } catch (error) {
+    console.error("AUTO DISPATCH GLOBAL ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to initiate auto-dispatch" });
   }
 };

@@ -1,8 +1,15 @@
 import { pool } from '../configs/db.js';
-import { createShiprocketOrder, getShiprocketTracking, cancelShiprocketOrder } from '../utils/shiprocket.js';
+import { 
+    createShiprocketOrder, 
+    getShiprocketTracking, 
+    cancelShiprocketOrder,
+    getShiprocketServiceability,
+    assignShiprocketAWB,
+    generateShiprocketPickup
+} from '../utils/shiprocket.js';
 
 /**
- * Internal helper to push an order to Shiprocket
+ * Intelligent Auto-Pilot: Create SR Order -> Choose Best Courier -> Assign AWB -> Schedule Pickup
  * @param {string} orderId 
  * @param {object} client - Optional DB client for transaction
  */
@@ -41,7 +48,7 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
     `, [firstSellerId]);
 
     if (pickupRes.rows.length === 0) {
-        throw new Error("Seller has no default pickup location. Please add one in Seller Dashboard -> Pickups.");
+        throw new Error(`Seller (ID: ${firstSellerId}) has no default pickup location. Please add one in Seller Dashboard.`);
     }
 
     const pickupLocation = pickupRes.rows[0];
@@ -50,18 +57,18 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
     const nameParts = (order.full_name || "Customer").trim().split(/\s+/);
     const firstName = nameParts[0] || "Customer";
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
-    
-    // Ensure phone is at least 10 digits for Shiprocket validation
     const validPhone = order.phone && order.phone.length >= 10 ? order.phone : "9999999999";
+    
+    console.log(`\n[SHIPROCKET LOG] Initiating dispatch for Order ID: ${orderId}`);
+    console.log(`[SHIPROCKET LOG] Fetched ${items.length} items. Pickup location: ${pickupLocation.location_name}`);
 
     const srPayload = {
-        order_id: order.order_id.slice(0, 20),
+        order_id: order.order_id.toString().slice(0, 20),
         order_date: new Date(order.placed_at).toISOString().split('T')[0],
         pickup_location: pickupLocation.location_name,
         billing_customer_name: firstName,
         billing_last_name: lastName,
         billing_address: order.address_line_1,
-        billing_address_2: "",
         billing_city: order.city,
         billing_pincode: order.pincode,
         billing_state: order.state,
@@ -69,24 +76,11 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
         billing_email: order.email,
         billing_phone: validPhone,
         shipping_is_billing: true,
-        shipping_customer_name: firstName,
-        shipping_last_name: lastName,
-        shipping_address: order.address_line_1,
-        shipping_address_2: "",
-        shipping_city: order.city,
-        shipping_pincode: order.pincode,
-        shipping_country: "India",
-        shipping_state: order.state,
-        shipping_email: order.email,
-        shipping_phone: validPhone,
         order_items: items.map(item => ({
             name: item.product_name,
             sku: item.sku || item.product_id.slice(0, 8),
             units: item.quantity,
-            selling_price: Number(item.unit_price),
-            discount: 0,
-            tax: 0,
-            hsn: 0
+            selling_price: Number(item.unit_price)
         })),
         payment_method: order.payment_method === 'cod' ? 'COD' : 'Prepaid',
         sub_total: Number(order.subtotal),
@@ -96,26 +90,75 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
         weight: items.reduce((acc, i) => acc + (Number(i.weight) || 0.5) * i.quantity, 0)
     };
 
-    // 5. Call Shiprocket API
-    console.log("Shiprocket Payload:", JSON.stringify(srPayload, null, 2));
-    const srResponse = await createShiprocketOrder(srPayload);
+    console.log(`[SHIPROCKET LOG] Request Payload:`, JSON.stringify(srPayload, null, 2));
 
-    if (!srResponse || !srResponse.order_id) {
-        throw new Error(srResponse.message || "Failed to create Shiprocket order");
+    // 5. STEP 1: Create Order in Shiprocket
+    const srOrderRes = await createShiprocketOrder(srPayload);
+    console.log(`[SHIPROCKET LOG] API Response:`, JSON.stringify(srOrderRes, null, 2));
+
+    if (!srOrderRes || !srOrderRes.order_id) {
+        throw new Error(srOrderRes.message || "Shiprocket: Failed to create order. Check terminal for raw API response.");
     }
 
-    // 6. Save to shiprocket_orders table
+    const srOrderId = srOrderRes.order_id;
+    const shipmentId = srOrderRes.shipment_id;
+
+    // 6. STEP 2: Intelligent Courier Selection (Serviceability)
+    const svcParams = {
+        pickup_postcode: pickupLocation.pincode,
+        delivery_postcode: order.pincode,
+        weight: srPayload.weight,
+        cod: order.payment_method === 'cod' ? 1 : 0,
+        is_return: 0
+    };
+    
+    const svcRes = await getShiprocketServiceability(svcParams);
+    let selectedCourierId = null;
+    let courierName = "Shiprocket Auto";
+
+    if (svcRes && svcRes.status === 200 && svcRes.data.available_courier_companies.length > 0) {
+        // Sort by price (cheapest) or rating (best). Let's go with cheapest for auto-pilot.
+        const bestCourier = svcRes.data.available_courier_companies.sort((a, b) => Number(a.rate) - Number(b.rate))[0];
+        selectedCourierId = bestCourier.courier_company_id;
+        courierName = bestCourier.courier_name;
+    }
+
+    // 7. STEP 3: Assign AWB
+    let awbCode = null;
+    if (selectedCourierId) {
+        const awbRes = await assignShiprocketAWB({
+            shipment_id: shipmentId,
+            courier_id: selectedCourierId
+        });
+        if (awbRes.status === 200) {
+            awbCode = awbRes.response.data.awb_code;
+        }
+    }
+
+    // 8. STEP 4: Generate Pickup
+    if (awbCode) {
+        await generateShiprocketPickup([shipmentId]);
+    }
+
+    // 9. Save to shiprocket_orders table
     await client.query(`
         INSERT INTO shiprocket_orders (
-            sr_order_id, order_id, shipment_id, sr_status, sr_created_at, updated_at
-        ) VALUES (gen_random_uuid(), $1, $2, 'NEW', NOW(), NOW())
+            sr_order_id, order_id, shipment_id, sr_status, awb_code, courier_name, sr_created_at, updated_at
+        ) VALUES ($1, $2, $3, 'READY_TO_SHIP', $4, $5, NOW(), NOW())
         ON CONFLICT (order_id) DO UPDATE SET 
             shipment_id = EXCLUDED.shipment_id,
             sr_status = EXCLUDED.sr_status,
+            awb_code = EXCLUDED.awb_code,
+            courier_name = EXCLUDED.courier_name,
             updated_at = NOW()
-    `, [order.order_id, srResponse.shipment_id.toString()]);
+    `, [srOrderId.toString(), order.order_id, shipmentId.toString(), awbCode, courierName]);
 
-    return srResponse;
+    return { 
+        sr_order_id: srOrderId, 
+        shipment_id: shipmentId, 
+        awb_code: awbCode, 
+        courier: courierName 
+    };
 };
 
 /**
@@ -135,9 +178,11 @@ export const initiateShipment = async (req, res) => {
         `, [srResponse.shipment_id.toString(), orderId]);
 
         await client.query('COMMIT');
+        console.log(`[SHIPROCKET LOG] SUCCESS: Order ${orderId} successfully dispatched!`);
         return res.status(200).json({ success: true, message: "Shipment initiated", data: srResponse });
     } catch (error) {
         await client.query('ROLLBACK');
+        console.error(`\n[SHIPROCKET ERROR] Failed to dispatch order ${orderId}:`, error.message);
         return res.status(500).json({ success: false, message: error.message });
     } finally {
         client.release();
@@ -172,6 +217,45 @@ export const cancelShipment = async (orderId, client = pool) => {
         }
     } catch (error) {
         console.error("Cancel Shipment Error:", error.message);
+    }
+};
+
+/**
+ * Get serviceability details for an order
+ */
+export const getServiceability = async (req, res) => {
+    const { orderId } = req.params;
+    try {
+        // 1. Fetch Order and Pickup Details
+        const orderRes = await pool.query(`
+            SELECT o.pincode, o.payment_method, o.subtotal,
+                   (SELECT pincode FROM seller_pickup_location WHERE seller_id = (SELECT seller_id FROM order_items WHERE order_id = o.order_id LIMIT 1) AND is_default = true) as pickup_pincode,
+                   (SELECT SUM(p.weight * oi.quantity) FROM order_items oi JOIN products p ON oi.product_id = p.product_id WHERE oi.order_id = o.order_id) as weight
+            FROM orders o
+            WHERE o.order_id = $1
+        `, [orderId]);
+
+        if (orderRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+
+        const order = orderRes.rows[0];
+
+        // 2. Call Shiprocket Serviceability API
+        const svcRes = await getShiprocketServiceability({
+            pickup_postcode: order.pickup_pincode,
+            delivery_postcode: order.pincode,
+            weight: order.weight || 0.5,
+            cod: order.payment_method === 'cod' ? 1 : 0
+        });
+
+        if (svcRes.status === 200) {
+            return res.status(200).json({ success: true, data: svcRes.data });
+        } else {
+            return res.status(400).json({ success: false, message: svcRes.message || "Failed to fetch serviceability" });
+        }
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 

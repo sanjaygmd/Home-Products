@@ -40,6 +40,7 @@ export const getAuthToken = async () => {
     // Set expiry to 9 days from now
     tokenExpiry = Date.now() + 9 * 24 * 60 * 60 * 1000;
     
+    console.log('✅ Shiprocket Authentication Successful');
     return authToken;
   } catch (error) {
     console.error('Shiprocket Auth Exception:', error.message);
@@ -123,6 +124,72 @@ export const getShiprocketTracking = async (awbCode) => {
     return data;
   } catch (error) {
     console.error('Shiprocket Tracking Error:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+
+/**
+ * Get serviceability and courier options for a shipment
+ */
+export const getShiprocketServiceability = async (params) => {
+  const token = await getAuthToken();
+  const query = new URLSearchParams(params).toString();
+
+  try {
+    const response = await fetch(`${BASE_URL}/courier/serviceability?${query}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Shiprocket Serviceability Error:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+
+/**
+ * Assign AWB to a shipment
+ */
+export const assignShiprocketAWB = async (payload) => {
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(`${BASE_URL}/courier/assign/awb`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(payload),
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Shiprocket AWB Assign Error:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+
+/**
+ * Generate pickup for a shipment
+ */
+export const generateShiprocketPickup = async (shipmentIds) => {
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(`${BASE_URL}/courier/generate/pickup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ shipment_id: shipmentIds }),
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Shiprocket Pickup Generation Error:', error.message);
     return { success: false, message: error.message };
   }
 };

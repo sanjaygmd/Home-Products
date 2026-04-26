@@ -1,8 +1,8 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Package, ShoppingCart, Users,
-  Ticket, Shield, CreditCard, FileBarChart, Store,
-  MessageSquare
+  Ticket, Shield, CreditCard, BarChart3, Store,
+  MessageSquare, Landmark
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 
@@ -11,11 +11,11 @@ const navItems = [
   { title: "Products", path: "/admin/products", icon: Package },
   { title: "Orders", path: "/admin/orders", icon: ShoppingCart },
   { title: "Customers", path: "/admin/customers", icon: Users },
+  { title: "Sellers", path: "/admin/sellers", icon: Store },
   { title: "Coupons", path: "/admin/coupons", icon: Ticket },
-  { title: "Reviews", path: "/admin/reviews", icon: MessageSquare },
+  { title: "Finance", path: "/admin/finance", icon: Landmark },
+  { title: "Analytics", path: "/admin/analytics", icon: BarChart3 },
   { title: "Logs", path: "/admin/logs", icon: Shield },
-  { title: "Payments", path: "/admin/payments", icon: CreditCard },
-  { title: "Reports", path: "/admin/reports", icon: FileBarChart },
 ];
 
 export function AdminSidebar() {

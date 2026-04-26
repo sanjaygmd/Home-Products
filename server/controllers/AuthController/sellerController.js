@@ -50,7 +50,8 @@ export const loginSeller = async (req, res) => {
     if (!user.is_active) {
       return res.status(403).json({
         success: false,
-        message: 'Your seller account has been restricted. Please contact administration.'
+        message: user.block_reason || 'Your seller account has been restricted. Please contact administration.',
+        block_reason: user.block_reason
       });
     }
 
@@ -553,7 +554,7 @@ export const getSellerFinanceAnalytics = async (req, res) => {
 
     const ensureDaily = async () => {
       // Always ensure daily finances are synced for the last 30 days to account for recent cancellations
-      await populateFinancesFromOrders(sellerId, 30);
+      await populateFinancesFromOrders(sellerId, 365); // Sync last year by default for accuracy
     };
 
     await ensureDaily();
@@ -666,7 +667,9 @@ async function populateFinancesFromOrders(sellerId, days = null) {
     FROM orders o
     JOIN order_sellers os ON o.order_id = os.order_id
     WHERE os.seller_id = $1
+    AND (o.payment_status = 'Paid' OR o.order_status = 'Delivered')
     AND o.order_status != 'Cancelled'
+    AND o.is_deleted = false
   `;
   const params = [sellerId];
 

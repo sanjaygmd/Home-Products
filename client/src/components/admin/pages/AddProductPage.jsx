@@ -234,8 +234,8 @@ export default function AddProductPage() {
     if (e) e.preventDefault();
     if (submitting) return;
 
-    if (!form.name || !form.price || !form.category_id || !form.seller_id) {
-      toast({ variant: "destructive", title: "Missing Information", description: "Please fill in all required fields including Target Seller." });
+    if (!form.name || !form.price || !form.category_id) {
+      toast({ variant: "destructive", title: "Missing Information", description: "Please fill in all required fields." });
       return;
     }
 
@@ -551,9 +551,9 @@ export default function AddProductPage() {
               
               <div className="space-y-6">
                  <div>
-                    <label className={labelClass}>Target Seller *</label>
+                    <label className={labelClass}>Target Seller</label>
                     <select name="seller_id" value={form.seller_id} onChange={handleChange} className="w-full h-14 px-5 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-black appearance-none cursor-pointer">
-                       <option value="">Select Account</option>
+                       <option value="">Platform Owned (Admin)</option>
                        {sellers.map((sel) => (
                          <option key={sel.id} value={sel.id}>{sel.name}</option>
                        ))}

@@ -23,7 +23,7 @@ const menu = [
   { name: "Analytics", path: "/seller/analytics", icon: <BarChartIcon /> },
   { name: "Payments", path: "/seller/payments", icon: <PaymentsIcon /> },
   // { name: "Messages", path: "/seller/messages", icon: <MessageIcon /> },
-  { name: "Pickups", path: "/seller/pickups", icon: <AddLocationIcon /> },
+  // { name: "Pickups", path: "/seller/pickups", icon: <AddLocationIcon /> },
   { name: "Settings", path: "/seller/settings", icon: <SettingsIcon /> },
   { name: "Logout", path: "/seller/logout", icon: <LogoutIcon /> },
 ];

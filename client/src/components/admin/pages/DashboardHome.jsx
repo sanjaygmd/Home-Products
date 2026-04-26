@@ -134,7 +134,7 @@ export default function DashboardHome() {
               Order History
             </button>
             <button
-              onClick={() => navigate('/admin/reports')}
+              onClick={() => navigate('/admin/analytics')}
               className="h-16 px-10 rounded-[1.5rem] bg-violet-600/20 backdrop-blur-xl text-white border border-white/20 text-xs font-black uppercase tracking-widest hover:bg-violet-600/40 transition-all active:scale-95 flex items-center gap-3"
             >
               <Zap size={18} className="text-violet-400 fill-violet-400" /> Sales Insights
@@ -186,132 +186,39 @@ export default function DashboardHome() {
         />
       </div>
 
-      <div className="grid gap-10 lg:grid-cols-3">
-        {/* Sales Performance Chart */}
-        <div className="lg:col-span-2 bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-          <div className="flex justify-between items-center mb-12">
-            <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Sales Performance</h3>
-              <p className="text-sm text-slate-400 font-bold mt-1 opacity-80 uppercase tracking-widest italic">Revenue & Growth Overview</p>
-            </div>
-            <button className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:bg-slate-950 hover:text-white transition-all shadow-sm">
-              <BarChart3 size={20} />
-            </button>
-          </div>
-
-          <div className="h-[400px] w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dashboardData?.revenueTrend || []}>
-                <defs>
-                  <linearGradient id="colorRevOverview" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 900, fill: '#94a3b8' }} dy={15} />
-                <YAxis hide />
-                <Tooltip
-                  contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 40px 60px -15px rgb(0 0 0 / 0.12)', padding: '24px', background: 'rgba(255, 255, 255, 0.98)', backdropFilter: 'blur(10px)' }}
-                  itemStyle={{ fontWeight: '950', color: '#8b5cf6', fontSize: '15px' }}
-                  labelStyle={{ fontWeight: '900', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}
-                  formatter={(v) => [`₹${v.toLocaleString()}`, 'Revenue']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="#8b5cf6"
-                  strokeWidth={6}
-                  fillOpacity={1}
-                  fill="url(#colorRevOverview)"
-                  activeDot={{ r: 8, strokeWidth: 0, fill: '#8b5cf6 shadow-2xl shadow-violet-400' }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Catalog Distribution */}
-        <div className="bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm relative overflow-hidden flex flex-col group hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-          <div className="flex justify-between items-center mb-10">
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Product Categories</h3>
-            <LayoutGrid size={24} className="text-slate-300" />
-          </div>
-
-          <div className="h-[260px] relative mb-12">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={dashboardData?.categoryDistribution || []}
-                  innerRadius={70}
-                  outerRadius={105}
-                  paddingAngle={12}
-                  dataKey="value"
-                  animationDuration={2500}
-                >
-                  {(dashboardData?.categoryDistribution || []).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} strokeWidth={0} className="hover:opacity-80 transition-opacity" />)}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 30px -5px rgb(0 0 0 / 0.1)', padding: '16px' }}
-                  itemStyle={{ fontWeight: '950', fontSize: '13px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-4xl font-black text-slate-950 leading-none tracking-tighter">{stats.total_products || 0}</span>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">All Products</span>
-            </div>
-          </div>
-
-          <div className="space-y-4 overflow-y-auto max-h-[250px] no-scrollbar">
-            {(dashboardData?.categoryDistribution || []).map((c, i) => (
-              <div key={c.name} className="flex items-center justify-between p-5 rounded-[1.5rem] bg-slate-50/70 group/item transition-all hover:bg-white hover:shadow-lg hover:shadow-slate-100 border border-transparent hover:border-slate-100">
-                <div className="flex items-center gap-4">
-                  <div className="h-4 w-4 rounded-full shadow-lg transition-transform group-hover/item:scale-125" style={{ background: COLORS[i % COLORS.length] }} />
-                  <span className="text-[13px] font-black text-slate-800 uppercase tracking-widest">{c.name}</span>
-                </div>
-                <div className="text-right">
-                  <p className="text-[14px] font-black text-slate-950 tracking-tight">{c.value}</p>
-                  <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">Products</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-10 lg:grid-cols-2">
+      {/* Main Grid: Orders & Actions */}
+      <div className="grid gap-10 lg:grid-cols-5 items-start">
         {/* Recent Transactions Matrix */}
-        <div className="bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
+        <div className="lg:col-span-3 bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
           <div className="flex justify-between items-center mb-12">
             <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-none">Recent Orders</h3>
-              <p className="text-sm text-slate-400 font-bold mt-2 uppercase tracking-widest opacity-70">Latest Customer Transactions</p>
+              <h3 className="text-3xl font-black text-slate-950 tracking-tight leading-none">Latest Orders</h3>
+              <p className="text-sm text-slate-400 font-bold mt-3 uppercase tracking-widest opacity-70 italic">Real-time marketplace activity</p>
             </div>
             <button
               onClick={() => navigate('/admin/orders')}
-              className="text-xs font-black text-violet-600 bg-violet-50 px-6 py-3 rounded-2xl hover:bg-violet-600 hover:text-white transition-all active:scale-95"
+              className="h-14 px-8 rounded-2xl bg-slate-950 text-white font-black text-[10px] uppercase tracking-widest hover:bg-violet-600 transition-all shadow-xl active:scale-95 flex items-center gap-2"
             >
-              View All Orders
+              View Full Feed <Rocket size={14} />
             </button>
           </div>
 
           <div className="space-y-6">
             {(dashboardData?.recentOrders || []).map((o) => (
-              <div key={o.id} className="flex items-center justify-between p-7 rounded-[2rem] bg-slate-50/50 hover:bg-white transition-all duration-500 border border-transparent hover:border-slate-100 group/row cursor-pointer shadow-sm hover:shadow-xl hover:shadow-slate-200/50">
+              <div key={o.id} className="flex items-center justify-between p-7 rounded-[2.5rem] bg-slate-50/50 hover:bg-white transition-all duration-500 border border-transparent hover:border-slate-100 group/row cursor-pointer shadow-sm hover:shadow-xl hover:shadow-slate-200/50">
                 <div className="flex items-center gap-6">
-                  <div className="h-16 w-16 rounded-2xl bg-white border border-slate-100 flex items-center justify-center text-violet-600 shadow-sm group-hover/row:scale-110 group-hover/row:rotate-6 transition-all duration-500">
+                  <div className="h-16 w-16 rounded-[1.5rem] bg-white border border-slate-100 flex items-center justify-center text-violet-600 shadow-sm group-hover/row:scale-110 group-hover/row:rotate-6 transition-all duration-500">
                     <PackageCheck size={32} />
                   </div>
                   <div>
-                    <h4 className="text-lg font-black text-slate-900 tracking-tight group-hover/row:text-violet-600 transition-colors">{o.customer}</h4>
+                    <h4 className="text-xl font-black text-slate-900 tracking-tight group-hover/row:text-violet-600 transition-colors">{o.customer}</h4>
                     <p className="text-[11px] font-black text-slate-400 mt-2 uppercase tracking-[0.15em] flex items-center gap-2">
-                      ORDER: <span className="text-slate-950 font-black">#{o.id.split('-')[0].toUpperCase()}</span> <span className="h-1 w-1 rounded-full bg-slate-300" /> {o.items} Items
+                      ORDER: <span className="text-slate-950 font-black">#{o.id.split('-')[0].toUpperCase()}</span> <span className="h-1 w-1 rounded-full bg-slate-300" /> {o.items} Units
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-black text-slate-950 tracking-tighter italic">{o.total}</p>
+                  <p className="text-2xl font-black text-slate-950 tracking-tighter italic">₹{o.total}</p>
                   <span className={cn("inline-flex items-center gap-2 mt-3 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest",
                     o.status === 'Delivered' ? 'bg-emerald-50 text-emerald-600' :
                       o.status === 'Cancelled' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'
@@ -325,74 +232,60 @@ export default function DashboardHome() {
                 </div>
               </div>
             ))}
+            {(!dashboardData?.recentOrders?.length) && (
+              <div className="p-20 text-center bg-slate-50 rounded-[3rem] border border-dashed border-slate-200">
+                <p className="text-slate-400 font-black uppercase tracking-widest italic">No recent transactions recorded</p>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Quick Intelligence Tools */}
-        <div className="flex flex-col gap-10">
-          <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-            <h3 className="text-2xl font-black text-slate-900 mb-10 tracking-tight">Quick Actions</h3>
-            <div className="grid grid-cols-1 gap-6">
-              <button
-                onClick={() => navigate('/admin/products')}
-                className="flex items-center gap-6 p-7 rounded-[2.5rem] bg-slate-50 hover:bg-violet-600 hover:text-white transition-all group border border-transparent shadow-sm hover:shadow-xl hover:shadow-violet-200 active:scale-95"
-              >
-                <div className="h-16 w-16 bg-white rounded-[1.5rem] flex items-center justify-center text-violet-600 group-hover:bg-violet-500 group-hover:text-white transition-colors shadow-sm">
-                  <Package size={28} />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-black uppercase tracking-[0.2em]">Manage Products</p>
-                  <p className="text-[10px] opacity-60 font-black mt-1 uppercase tracking-widest">Update catalog</p>
-                </div>
-              </button>
-
-              <button
-                onClick={() => navigate('/admin/orders')}
-                className="flex items-center gap-6 p-7 rounded-[2.5rem] bg-slate-50 hover:bg-indigo-600 hover:text-white transition-all group border border-transparent shadow-sm hover:shadow-xl hover:shadow-indigo-200 active:scale-95"
-              >
-                <div className="h-16 w-16 bg-white rounded-[1.5rem] flex items-center justify-center text-indigo-600 group-hover:bg-indigo-500 group-hover:text-white transition-colors shadow-sm">
-                  <LayoutGrid size={28} />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-black uppercase tracking-[0.2em]">Manage Orders</p>
-                  <p className="text-[10px] opacity-60 font-black mt-1 uppercase tracking-widest">Fulfill new orders</p>
-                </div>
-              </button>
-
-              <button
-                onClick={() => navigate('/admin/customers')}
-                className="flex items-center gap-6 p-7 rounded-[2.5rem] bg-slate-50 hover:bg-emerald-600 hover:text-white transition-all group border border-transparent shadow-sm hover:shadow-xl hover:shadow-emerald-200 active:scale-95"
-              >
-                <div className="h-16 w-16 bg-white rounded-[1.5rem] flex items-center justify-center text-emerald-600 group-hover:bg-emerald-500 group-hover:text-white transition-colors shadow-sm">
-                  <Users size={28} />
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-black uppercase tracking-[0.2em]">Manage Customers</p>
-                  <p className="text-[10px] opacity-60 font-black mt-1 uppercase tracking-widest">View customer details</p>
-                </div>
-              </button>
+        <div className="lg:col-span-2 flex flex-col gap-8">
+          <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
+            <h3 className="text-2xl font-black text-slate-900 mb-8 tracking-tight">Rapid Access</h3>
+            <div className="grid grid-cols-1 gap-5">
+              {[
+                { label: 'Manage Products', sub: 'Update catalog', icon: Package, color: 'text-violet-600', bg: 'bg-violet-50', hover: 'hover:bg-violet-600', path: '/admin/products' },
+                { label: 'Manage Orders', sub: 'Fulfill new orders', icon: LayoutGrid, color: 'text-indigo-600', bg: 'bg-indigo-50', hover: 'hover:bg-indigo-600', path: '/admin/orders' },
+                { label: 'Manage Customers', sub: 'Directory & Profiles', icon: Users, color: 'text-emerald-600', bg: 'bg-emerald-50', hover: 'hover:bg-emerald-600', path: '/admin/customers' },
+              ].map((item, i) => (
+                <button
+                  key={i}
+                  onClick={() => navigate(item.path)}
+                  className={cn("flex items-center gap-6 p-6 rounded-[2rem] bg-slate-50 transition-all group border border-transparent shadow-sm hover:shadow-xl hover:text-white active:scale-95", item.hover)}
+                >
+                  <div className={cn("h-14 w-14 rounded-2xl flex items-center justify-center transition-colors shadow-sm bg-white", item.color)}>
+                    <item.icon size={24} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-xs font-black uppercase tracking-[0.2em]">{item.label}</p>
+                    <p className="text-[10px] opacity-60 font-black mt-1 uppercase tracking-widest">{item.sub}</p>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-slate-950 to-indigo-950 p-12 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden group hover:-translate-y-2 transition-all duration-700">
+          <div className="bg-slate-950 p-10 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden group hover:-translate-y-2 transition-all duration-700 h-full flex flex-col justify-between">
             <div className="relative z-10">
               <div className="flex items-center gap-4 mb-8">
                 <div className="p-3 bg-white/10 backdrop-blur-xl rounded-2xl border border-white/20">
-                  <Rocket size={24} className="text-violet-400" />
+                  <Activity size={24} className="text-violet-400" />
                 </div>
-                <h4 className="text-2xl font-black tracking-tight">Business Growth</h4>
+                <h4 className="text-2xl font-black tracking-tight">Market Intelligence</h4>
               </div>
-              <p className="text-violet-200/60 text-base leading-relaxed font-bold italic">
-                Analyze sales trends and scale your marketplace operations. Access the latest growth analytics.
+              <p className="text-violet-200/60 text-sm leading-relaxed font-bold italic">
+                Analyze velocity metrics and scale your marketplace operations via the consolidated Analytics Hub.
               </p>
-              <button
-                onClick={() => navigate('/admin/reports')}
-                className="mt-10 w-full bg-white text-slate-950 py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-violet-50 transition-all active:scale-95 shadow-xl shadow-white/5"
-              >
-                View Insights
-              </button>
             </div>
-            <div className="absolute top-[-20%] left-[-20%] w-60 h-60 bg-violet-600/20 rounded-full blur-[80px] group-hover:bg-violet-600/30 transition-colors"></div>
+            <button
+              onClick={() => navigate('/admin/analytics')}
+              className="mt-8 w-full bg-white text-slate-950 py-5 rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.4em] hover:bg-violet-50 transition-all active:scale-95 shadow-xl"
+            >
+              Enter Hub <BarChart3 size={14} className="inline ml-2" />
+            </button>
+            <div className="absolute top-[-20%] left-[-20%] w-60 h-60 bg-violet-600/20 rounded-full blur-[80px]" />
           </div>
         </div>
       </div>

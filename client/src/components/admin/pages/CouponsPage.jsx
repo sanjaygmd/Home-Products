@@ -136,11 +136,23 @@ const CouponsPage = () => {
                                         {coupon.used_count} / {coupon.max_usage || '∞'}
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                            coupon.is_active ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                                        }`}>
-                                            {coupon.is_active ? 'Active' : 'Inactive'}
-                                        </span>
+                                        {(() => {
+                                            const isExpired = coupon.valid_until && new Date(coupon.valid_until) < new Date();
+                                            if (isExpired) {
+                                                return (
+                                                    <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-orange-100 text-orange-600">
+                                                        Expired
+                                                    </span>
+                                                );
+                                            }
+                                            return (
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                                    coupon.is_active ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                                                }`}>
+                                                    {coupon.is_active ? 'Active' : 'Inactive'}
+                                                </span>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="px-6 py-4 text-right space-x-2">
                                         <button 

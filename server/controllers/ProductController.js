@@ -26,10 +26,10 @@ export const addProduct = async (req, res) => {
             discount_percent
         } = req.body;
 
-        if (!name || !price || !seller_id || !category_id) {
+        if (!name || !price || !category_id) {
             return res.status(400).json({
                 success: false,
-                message: "Required fields missing (name, price, seller_id, category_id)"
+                message: "Required fields missing (name, price, category_id)"
             });
         }
 
@@ -44,7 +44,7 @@ export const addProduct = async (req, res) => {
                 RETURNING *`,
                 [
                     category_id,
-                    seller_id,
+                    seller_id || null,
                     name,
                     description,
                     sku,

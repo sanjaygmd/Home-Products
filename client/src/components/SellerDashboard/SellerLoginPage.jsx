@@ -103,7 +103,12 @@ const SellerLoginPage = () => {
             />
           </div>
 
-          {error && <p className="text-sm py-2 text-red-500">{error}</p>}
+          {error && (
+            <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl">
+              <p className="text-xs font-black text-rose-600 uppercase tracking-widest mb-1">Access Error</p>
+              <p className="text-sm font-bold text-rose-700">{error}</p>
+            </div>
+          )}
 
           <button
             type="submit"

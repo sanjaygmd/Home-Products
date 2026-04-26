@@ -1,44 +1,44 @@
 export const clientExamples = [
   {
     id: 1,
-    date: "14 April, 2026",
-    name: "John",
+    date: "24 April, 2026",
+    name: "Rajesh Kumar",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "I recently purchased the modern TV unit, and I must say it has completely transformed my living room. The quality of the wood and the finish is top-notch. Highly recommended for anyone looking for premium furniture!",
   },
   {
     id: 2,
-    date: "14 April, 2026",
-    name: "Jane",
+    date: "22 April, 2026",
+    name: "Sneha Kapoor",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "Amazing shopping experience! The website is so easy to navigate, and the delivery was much faster than I expected. The product arrived in perfect condition. Will definitely shop here again.",
   },
   {
     id: 3,
-    date: "14 April, 2026",
-    name: "Doe",
+    date: "20 April, 2026",
+    name: "Amitabh Bachchan",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "The attention to detail in their products is remarkable. I bought a set of decorative lamps, and they add such a warm vibe to my home. Exceptional craftsmanship!",
   },
   {
     id: 4,
-    date: "14 April, 2026",
-    name: "Doe",
+    date: "18 April, 2026",
+    name: "Deepika Padukone",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "Excellent customer service! I had a query regarding my order, and the support team was very responsive and helpful. It's rare to find such dedicated service nowadays.",
   },
   {
     id: 5,
-    date: "14 April, 2026",
-    name: "Doe",
+    date: "15 April, 2026",
+    name: "Virat Kohli",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "The collection here is quite unique. I found some pieces that I couldn't find in any other store. The pricing is also very competitive for the quality they provide.",
   },
   {
     id: 6,
-    date: "14 April, 2026",
-    name: "Doe",
+    date: "12 April, 2026",
+    name: "Priyanka Chopra",
     feedback:
-      "Lorem ipsum dolor sit amet consectetur adipisicing elit. Perferendis, voluptatem soluta! Maxime earum non ut, quibusdam quidem aliquam.",
+      "I love the sustainable approach of this brand. The packaging was eco-friendly, and the product itself feels very durable. Great work by the team!",
   },
 ];

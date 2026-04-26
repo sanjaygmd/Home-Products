@@ -36,7 +36,8 @@ export const loginCustomer = async (req, res) => {
     if (!user.is_active) {
       return res.status(403).json({
         success: false,
-        message: 'Your account has been restricted. Please contact support.'
+        message: user.block_reason || 'Your account has been restricted. Please contact support.',
+        block_reason: user.block_reason
       });
     }
 

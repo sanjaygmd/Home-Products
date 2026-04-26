@@ -5,7 +5,7 @@ import { logAudit } from '../utils/auditLogger.js';
 export const getActiveCoupons = async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT * FROM coupons WHERE is_active = true AND (valid_until IS NULL OR valid_until > NOW()) ORDER BY created_at DESC"
+            "SELECT * FROM coupons WHERE is_active = true AND (valid_until IS NULL OR (valid_until + interval '23 hours 59 minutes 59 seconds') >= NOW()) ORDER BY created_at DESC"
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
@@ -32,9 +32,17 @@ export const validateCoupon = async (req, res) => {
             return res.status(400).json({ success: false, message: "This coupon is currently inactive" });
         }
 
-        // Check expiry
-        if (coupon.valid_until && new Date(coupon.valid_until) < new Date()) {
-            return res.status(400).json({ success: false, message: "Coupon has expired" });
+        // Check expiry (Set to end of the day for valid_until to be inclusive)
+        if (coupon.valid_until) {
+            const expiryDate = new Date(coupon.valid_until);
+            // If the time is exactly midnight, assume the admin meant the whole day
+            if (expiryDate.getHours() === 0 && expiryDate.getMinutes() === 0) {
+                expiryDate.setHours(23, 59, 59, 999);
+            }
+            
+            if (expiryDate < new Date()) {
+                return res.status(400).json({ success: false, message: "Coupon has expired" });
+            }
         }
 
         // Check usage limit

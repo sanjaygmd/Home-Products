@@ -102,9 +102,10 @@ const CustomerLogin = () => {
           </div>
 
           {error && (
-            <p className="text-red-600 bg-red-50 px-3 py-2 rounded-lg text-sm font-medium border border-red-100">
-              {error}
-            </p>
+            <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl">
+              <p className="text-xs font-black text-rose-600 uppercase tracking-widest mb-1">Access Restricted</p>
+              <p className="text-sm font-bold text-rose-700">{error}</p>
+            </div>
           )}
 
           <button

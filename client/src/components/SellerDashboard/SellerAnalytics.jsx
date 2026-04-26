@@ -133,7 +133,7 @@ const SellerAnalytics = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
           <div>
             <h3 className="text-2xl font-black text-gray-800 tracking-tight flex items-center gap-2">
-              Financial Performance <CalendarTodayIcon className="text-blue-600" />
+              Revenue Performance <CalendarTodayIcon className="text-blue-600" />
             </h3>
             <p className="text-sm text-gray-500 font-semibold mt-1">Detailed breakdown of your store's earnings</p>
           </div>

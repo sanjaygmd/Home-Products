@@ -164,6 +164,9 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkStatus, setBulkStatus] = useState("Shipped");
+  const [bulkCourier, setBulkCourier] = useState(COURIERS[0]);
 
   useEffect(() => {
     fetchOrders();
@@ -174,11 +177,58 @@ export default function OrdersPage() {
     try {
       const resp = await api.get('/user/admin/orders');
       setOrders(Array.isArray(resp.data) ? resp.data : []);
+      setSelectedIds(new Set()); // Reset on fetch
     } catch (err) {
       console.error('Fetch error:', err);
       setOrders([]);
     } finally {
       setLoadingOrders(false);
+    }
+  };
+
+  const toggleSelect = (id) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = (visibleOrders) => {
+    if (selectedIds.size === visibleOrders.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(visibleOrders.map(o => o.id)));
+    }
+  };
+
+  const handleBulkUpdate = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      const resp = await api.post('/user/admin/orders/bulk-update', {
+        orderIds: Array.from(selectedIds),
+        status: bulkStatus,
+        courier: bulkStatus === 'Shipped' ? bulkCourier : null
+      });
+      if (resp.data.success) {
+        toast({ title: "Bulk Update Success", description: resp.data.message });
+        setSelectedIds(new Set());
+        fetchOrders();
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to perform bulk update", variant: "destructive" });
+    }
+  };
+
+  const handleAutoPilot = async () => {
+    if (!window.confirm("This will automatically assign couriers and mark ALL pending orders as Shipped. Continue?")) return;
+    try {
+      const resp = await api.post('/user/admin/orders/auto-dispatch');
+      if (resp.data.success) {
+        toast({ title: "Auto-Pilot Success", description: resp.data.message });
+        fetchOrders();
+      }
+    } catch (err) {
+      toast({ title: "Auto-Pilot Failed", description: "System error during automated dispatch", variant: "destructive" });
     }
   };
 
@@ -268,6 +318,9 @@ export default function OrdersPage() {
   const [editTrackingId, setEditTrackingId] = useState("");
   const [editEstDate, setEditEstDate] = useState("");
   const [statusSaved, setStatusSaved] = useState(false);
+  const [srLoading, setSrLoading] = useState(false);
+  const [serviceability, setServiceability] = useState(null);
+  const [dispatchSuccess, setDispatchSuccess] = useState(null);
 
   const openOrder = (o) => {
     setSelectedOrder(o);
@@ -276,6 +329,8 @@ export default function OrdersPage() {
     setEditTrackingId(o.tracking_id || "");
     setEditEstDate(o.estimated_delivery || "");
     setStatusSaved(false);
+    setServiceability(null);
+    setDispatchSuccess(null);
   };
 
   const closeModal = () => setSelectedOrder(null);
@@ -354,112 +409,33 @@ export default function OrdersPage() {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
         <OrderStatCard
-          title="Total Orders"
+          title="Live Orders"
           value={orders.length.toLocaleString()}
           icon={ShoppingCart}
           color="text-violet-600"
           bg="bg-violet-50"
         />
         <OrderStatCard
-          title="Shipped"
-          value={orders.filter(o => o.status === 'Shipped').length}
-          icon={Truck}
-          color="text-blue-600"
-          bg="bg-blue-50"
-        />
-        <OrderStatCard
-          title="Completed"
+          title="Delivered"
           value={orders.filter(o => o.status === 'Delivered').length}
           icon={CheckCircle2}
           color="text-emerald-600"
           bg="bg-emerald-50"
         />
         <OrderStatCard
-          title="Revenue"
-          value={`₹${Math.round(orders.reduce((s, o) => s + Number(o.total_amount), 0) / 1000)}k`}
-          icon={TrendingUp}
+          title="Active Shipments"
+          value={orders.filter(o => o.status === 'Shipped').length}
+          icon={Truck}
+          color="text-blue-600"
+          bg="bg-blue-50"
+        />
+        <OrderStatCard
+          title="Pending Queue"
+          value={orders.filter(o => o.status === 'Processing' || o.status === 'Pending').length}
+          icon={Clock}
           color="text-amber-600"
           bg="bg-amber-50"
         />
-      </div>
-
-      {/* Analytics Row */}
-      <div className="grid gap-10 lg:grid-cols-3">
-        <div className="lg:col-span-2 bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm group overflow-hidden relative hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/5 blur-[100px] -mr-32 -mt-32 group-hover:bg-violet-500/10 transition-colors" />
-          <div className="flex items-center justify-between mb-12 relative z-10">
-            <div>
-              <h3 className="text-2xl font-black text-slate-950 tracking-tight">Order Trend</h3>
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mt-2">{timeRange} order frequency</p>
-            </div>
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
-              {["Daily", "Weekly", "Monthly", "Yearly"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTimeRange(t)}
-                  className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all",
-                    timeRange === t ? "bg-white text-violet-600 shadow-md" : "text-slate-400 hover:text-slate-600"
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={orderTrend}>
-                <defs>
-                  <linearGradient id="orderGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 900, fill: '#94a3b8' }} dy={15} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 900, fill: '#94a3b8' }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.15)', background: '#fff', padding: '20px' }}
-                  itemStyle={{ fontWeight: 950, color: '#0f172a' }}
-                />
-                <Area type="monotone" dataKey="orders" stroke="#8b5cf6" strokeWidth={5} fillOpacity={1} fill="url(#orderGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-sm group overflow-hidden relative hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-          <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 blur-[80px] -mr-24 -mt-24 group-hover:bg-emerald-500/10 transition-colors" />
-          <h3 className="text-2xl font-black text-slate-950 tracking-tight mb-10 relative z-10">Status Distribution</h3>
-          <div className="h-[220px] mb-12 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={statusBreakdown} innerRadius={75} outerRadius={105} paddingAngle={10} dataKey="value" strokeWidth={0} animationDuration={2000}>
-                  {statusBreakdown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} className="hover:opacity-80 transition-opacity cursor-pointer" />)}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', background: '#fff' }}
-                  itemStyle={{ fontWeight: 900 }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-3xl font-black text-slate-950 tracking-tighter leading-none">{orders.length}</span>
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-2">Total</span>
-            </div>
-          </div>
-          <div className="space-y-4 relative z-10">
-            {statusBreakdown.slice(0, 4).map((s, i) => (
-              <div key={s.name} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 hover:bg-white border border-transparent hover:border-slate-100 transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full shadow-lg" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
-                  <span className="text-[11px] font-black text-slate-600 uppercase tracking-widest">{s.name}</span>
-                </div>
-                <span className="text-sm font-black text-slate-950">{s.count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Main Order Table */}
@@ -479,18 +455,28 @@ export default function OrdersPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar bg-slate-50 p-2 rounded-[1.75rem] border border-slate-100">
-              {["All", "Processing", "Shipped", "Delivered", "Cancelled"].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setStatusFilter(f)}
-                  className={cn("h-12 px-6 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
-                    f === statusFilter ? "bg-slate-950 text-white shadow-xl" : "text-slate-400 hover:text-slate-900"
-                  )}
-                >
-                  {f}
-                </button>
-              ))}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar bg-slate-50 p-2 rounded-[1.75rem] border border-slate-100">
+                {["All", "Processing", "Shipped", "Delivered", "Cancelled"].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setStatusFilter(f)}
+                    className={cn("h-12 px-6 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
+                      f === statusFilter ? "bg-slate-950 text-white shadow-xl" : "text-slate-400 hover:text-slate-900"
+                    )}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+              
+              <button 
+                onClick={handleAutoPilot}
+                className="h-16 px-8 rounded-[1.75rem] bg-indigo-600 text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-violet-600 transition-all shadow-xl shadow-indigo-200/50 flex items-center gap-3 group active:scale-95"
+              >
+                <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Logistics Auto-Pilot
+              </button>
             </div>
           </div>
         </div>
@@ -499,7 +485,15 @@ export default function OrdersPage() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50/50">
-                <th className="px-12 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Order ID</th>
+                <th className="px-12 py-8 w-10">
+                   <input 
+                     type="checkbox" 
+                     className="h-5 w-5 rounded-lg border-2 border-slate-200 text-indigo-600 focus:ring-indigo-500 transition-all cursor-pointer"
+                     checked={selectedIds.size > 0 && selectedIds.size === filtered.length}
+                     onChange={() => toggleSelectAll(filtered)}
+                   />
+                </th>
+                <th className="px-6 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Order ID</th>
                 <th className="px-8 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Customer</th>
                 <th className="px-8 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Amount</th>
                 <th className="px-8 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Status</th>
@@ -509,8 +503,16 @@ export default function OrdersPage() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.map((o) => (
-                <tr key={o.id} className="hover:bg-slate-50/40 transition-all duration-300 group/row">
+                <tr key={o.id} className={cn("hover:bg-slate-50/40 transition-all duration-300 group/row", selectedIds.has(o.id) && "bg-indigo-50/30")}>
                   <td className="px-12 py-10">
+                    <input 
+                       type="checkbox" 
+                       className="h-5 w-5 rounded-lg border-2 border-slate-200 text-indigo-600 focus:ring-indigo-500 transition-all cursor-pointer"
+                       checked={selectedIds.has(o.id)}
+                       onChange={() => toggleSelect(o.id)}
+                    />
+                  </td>
+                  <td className="px-6 py-10">
                     <div className="flex flex-col">
                       <span className="text-xl font-black text-slate-950 tracking-tight group-hover/row:text-indigo-600 transition-colors">#{o.id}</span>
                       <span className="text-[11px] font-black text-slate-400 uppercase mt-2 tracking-widest flex items-center gap-2">
@@ -747,34 +749,190 @@ export default function OrdersPage() {
                   </div>
 
                   {/* Shipping & Logistics */}
-                  <div className="p-10 rounded-[3rem] border border-slate-100 bg-slate-50/50 shadow-sm space-y-8 hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700">
-                    <div className="flex items-center gap-4">
-                      <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600 border border-blue-100">
-                        <Truck size={18} />
+                  <div className="p-10 rounded-[3rem] border border-slate-100 bg-white shadow-sm space-y-8 hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-700 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-3xl -mr-16 -mt-16" />
+                    
+                    <div className="flex items-center justify-between relative z-10">
+                      <div className="flex items-center gap-4">
+                        <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600 border border-blue-100">
+                          <Truck size={18} />
+                        </div>
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Shiprocket Intelligence</h3>
                       </div>
-                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Shipping & Logistics</h3>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">Courier Partner</label>
-                        <select className="w-full h-14 px-5 rounded-2xl border-2 border-slate-100 bg-white text-[11px] font-black focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer" value={editCourier} onChange={e => setEditCourier(e.target.value)}>
-                          {COURIERS.map(c => <option key={c}>{c}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">Tracking ID</label>
-                        <input className="w-full h-14 px-5 rounded-2xl border-2 border-slate-100 bg-white text-[11px] font-black focus:outline-none focus:border-blue-500/30 transition-all placeholder:text-slate-200" placeholder="e.g. TRK123456" value={editTrackingId} onChange={e => setEditTrackingId(e.target.value)} />
-                      </div>
-                      <button onClick={handleUpdateStatus} className="w-full h-14 rounded-2xl bg-white border border-slate-200 text-slate-900 font-black uppercase text-[9px] tracking-[0.2em] hover:bg-slate-950 hover:text-white hover:border-slate-950 transition-all shadow-md active:scale-95">
-                        Update Logistics
+                      <button 
+                        onClick={async () => {
+                          setSrLoading(true);
+                          try {
+                            const res = await api.get(`/shipping/get-serviceability/${selectedOrder.id}`);
+                            if (res.data.success) setServiceability(res.data.data);
+                          } catch (err) {
+                            toast({ title: "Serviceability Failed", description: "Could not reach Shiprocket", variant: "destructive" });
+                          } finally { setSrLoading(false); }
+                        }}
+                        className="text-[9px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                      >
+                        {srLoading ? "Checking..." : "Refresh Serviceability"}
                       </button>
                     </div>
+
+                    {dispatchSuccess ? (
+                      <div className="bg-emerald-50 rounded-[2rem] p-8 border border-emerald-100 flex flex-col items-center text-center animate-in zoom-in duration-500 relative z-10">
+                        <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 text-emerald-500">
+                          <CheckCircle2 size={32} />
+                        </div>
+                        <h4 className="text-xl font-black text-slate-900 tracking-tight">Order Dispatched!</h4>
+                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-2 mb-6">Assigned to {dispatchSuccess.courier}</p>
+                        
+                        <div className="w-full bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm text-left mb-6">
+                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">AWB Tracking Code</p>
+                           <p className="text-sm font-black text-slate-900 font-mono">{dispatchSuccess.awb_code}</p>
+                        </div>
+                        
+                        <Button 
+                          onClick={closeModal}
+                          className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest transition-all"
+                        >
+                          Close Details
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-6 relative z-10">
+                        {/* Intelligent Auto-Pilot Button */}
+                      <Button 
+                        onClick={async () => {
+                          if (!window.confirm("Run Shiprocket Auto-Pilot for this order?")) return;
+                          setSrLoading(true);
+                          try {
+                            const res = await api.post(`/shipping/initiate/${selectedOrder.id}`);
+                            if (res.data.success) {
+                              toast({ title: "Smart Dispatch Success", description: `Assigned to ${res.data.data.courier}` });
+                              setDispatchSuccess(res.data.data);
+                              fetchOrders();
+                            }
+                          } catch (err) {
+                            toast({ title: "Dispatch Failed", description: err.response?.data?.message || "System error", variant: "destructive" });
+                          } finally { setSrLoading(false); }
+                        }}
+                        disabled={srLoading || selectedOrder.status === 'Shipped'}
+                        className="w-full h-16 rounded-2xl bg-slate-950 text-white hover:bg-blue-600 font-black uppercase text-[10px] tracking-[0.3em] flex items-center justify-center gap-3 group transition-all"
+                      >
+                        <ShieldCheck className="group-hover:animate-bounce" size={18} />
+                        {srLoading ? "Processing..." : "Smart Auto-Pilot Dispatch"}
+                      </Button>
+
+                      {/* Serviceability List */}
+                      {serviceability && (
+                        <div className="space-y-3 animate-in fade-in slide-in-from-top-4">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Available Couriers</p>
+                          <div className="max-h-[200px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                            {serviceability.available_courier_companies.map((c) => (
+                              <div key={c.courier_company_id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between hover:border-blue-200 transition-all">
+                                <div className="flex flex-col">
+                                  <span className="text-[11px] font-black text-slate-900">{c.courier_name}</span>
+                                  <span className="text-[9px] font-bold text-slate-400">Rating: {c.rating}/5</span>
+                                </div>
+                                <div className="flex flex-col items-end">
+                                  <span className="text-xs font-black text-blue-600">₹{c.rate}</span>
+                                  <span className="text-[9px] font-bold text-slate-400">Est. {c.etd}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-100"></span></div>
+                        <div className="relative flex justify-center text-[8px] uppercase font-black text-slate-300 bg-white px-4 tracking-[0.4em]">Or Manual Update</div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block ml-2">Courier</label>
+                            <select 
+                              className="w-full h-12 px-4 rounded-xl border border-slate-100 bg-slate-50 text-[10px] font-black focus:outline-none focus:border-blue-500 transition-all" 
+                              value={editCourier} 
+                              onChange={e => setEditCourier(e.target.value)}
+                            >
+                              {COURIERS.map(c => <option key={c}>{c}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block ml-2">Tracking ID</label>
+                            <input 
+                              className="w-full h-12 px-4 rounded-xl border border-slate-100 bg-slate-50 text-[10px] font-black focus:outline-none focus:border-blue-500 transition-all" 
+                              value={editTrackingId} 
+                              onChange={e => setEditTrackingId(e.target.value)} 
+                              placeholder="e.g. TRK123"
+                            />
+                          </div>
+                        </div>
+                        <button 
+                          onClick={handleUpdateStatus} 
+                          className="w-full h-12 rounded-xl bg-white border border-slate-200 text-slate-900 font-black uppercase text-[9px] tracking-[0.2em] hover:bg-slate-50 transition-all active:scale-95"
+                        >
+                          {statusSaved ? "Saved!" : "Update Status"}
+                        </button>
+                      </div>
+                    </div>
+                    )}
+                  </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+      )}
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-950 text-white px-10 py-6 rounded-[2.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.5)] z-[90] flex items-center gap-8 animate-in slide-in-from-bottom-12 duration-500 border border-white/10 backdrop-blur-xl">
+           <div className="flex items-center gap-4 pr-8 border-r border-white/10">
+              <div className="h-12 w-12 rounded-2xl bg-indigo-600 flex items-center justify-center font-black italic">
+                 {selectedIds.size}
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Selected</p>
+           </div>
+           
+           <div className="flex items-center gap-6">
+              <div className="flex flex-col gap-1.5">
+                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Set Status</label>
+                 <select 
+                   className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-indigo-500"
+                   value={bulkStatus}
+                   onChange={e => setBulkStatus(e.target.value)}
+                 >
+                   {["Pending", "Processing", "Shipped", "Delivered", "Cancelled"].map(s => <option key={s} className="bg-slate-900">{s}</option>)}
+                 </select>
+              </div>
+
+              {bulkStatus === 'Shipped' && (
+                <div className="flex flex-col gap-1.5">
+                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Courier</label>
+                   <select 
+                     className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-indigo-500"
+                     value={bulkCourier}
+                     onChange={e => setBulkCourier(e.target.value)}
+                   >
+                     {COURIERS.map(c => <option key={c} className="bg-slate-900">{c}</option>)}
+                   </select>
+                </div>
+              )}
+
+              <button 
+                onClick={handleBulkUpdate}
+                className="h-14 px-8 rounded-2xl bg-white text-slate-950 font-black uppercase text-[10px] tracking-[0.3em] hover:bg-indigo-500 hover:text-white transition-all shadow-xl active:scale-95 flex items-center gap-3"
+              >
+                Apply to {selectedIds.size} Orders
+              </button>
+           </div>
+
+           <button 
+             onClick={() => setSelectedIds(new Set())}
+             className="h-12 w-12 rounded-2xl bg-white/5 border border-white/5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-500 transition-all flex items-center justify-center"
+           >
+              <X size={20} />
+           </button>
         </div>
       )}
     </div>

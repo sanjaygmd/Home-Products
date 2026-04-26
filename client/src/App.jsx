@@ -46,7 +46,7 @@ import ProductsPage from './components/admin/pages/ProductsPage.jsx';
 import OrdersPage from './components/admin/pages/OrdersPage.jsx';
 import CustomersPage from './components/admin/pages/CustomersPage.jsx';
 import FinancePage from './components/admin/pages/FinancePage.jsx';
-import ReportsPage from './components/admin/pages/ReportsPage.jsx';
+import AnalyticsPage from './components/admin/pages/AnalyticsPage.jsx';
 import PaymentsPage from './components/admin/pages/PaymentsPage.jsx';
 import ReturnsPage from './components/admin/pages/ReturnsPage.jsx';
 import AdminProfilePage from './components/admin/pages/ProfilePage.jsx';
@@ -172,7 +172,7 @@ function MainApp() {
                       <Route path="orders" element={<OrdersPage />} />
                       <Route path="customers" element={<CustomersPage />} />
                       <Route path="finance" element={<FinancePage />} />
-                      <Route path="reports" element={<ReportsPage />} />
+                      <Route path="analytics" element={<AnalyticsPage />} />
                       <Route path="payments" element={<PaymentsPage />} />
                       <Route path="returns" element={<ReturnsPage />} />
                       <Route path="profile" element={<AdminProfilePage />} />

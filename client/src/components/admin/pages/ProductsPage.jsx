@@ -61,6 +61,7 @@ export default function ProductsPage() {
   const { deleteProduct } = useProducts();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ownerFilter, setOwnerFilter] = useState("All");
 
   const fetchAdminProducts = async () => {
     setLoading(true);
@@ -89,6 +90,12 @@ export default function ProductsPage() {
 
   const filtered = useMemo(() => {
     let res = products.filter(p => !p.isVariant);
+    
+    if (ownerFilter === "Platform") {
+      res = res.filter(p => !p.seller_id);
+    } else if (ownerFilter === "Sellers") {
+      res = res.filter(p => p.seller_id);
+    }
     if (search) {
       const q = search.toLowerCase();
       res = res.filter(p => 
@@ -98,7 +105,7 @@ export default function ProductsPage() {
       );
     }
     return res.map(p => ({ ...p, status: getStatus(p) }));
-  }, [products, search]);
+  }, [products, search, ownerFilter]);
 
   const dynamicStockData = useMemo(() => {
     const baseProducts = products.filter(p => !p.isVariant);
@@ -215,9 +222,22 @@ export default function ProductsPage() {
                     onChange={(e) => setSearch(e.target.value)}
                   />
                </div>
-               <button className="h-16 w-16 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-950 hover:text-white transition-all shadow-sm active:scale-90">
-                  <ListFilter className="h-6 w-6" />
-               </button>
+               <div className="flex bg-slate-50 p-1 rounded-[1.25rem] border border-slate-100 shadow-inner">
+                  {['All', 'Platform', 'Sellers'].map(f => (
+                    <button 
+                      key={f}
+                      onClick={() => setOwnerFilter(f)}
+                      className={cn(
+                        "px-6 h-14 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all",
+                        ownerFilter === f 
+                          ? "bg-white text-slate-950 shadow-sm border border-slate-200" 
+                          : "text-slate-400 hover:text-slate-700"
+                      )}
+                    >
+                      {f}
+                    </button>
+                  ))}
+               </div>
             </div>
           </div>
           

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users, UserCheck, UserPlus, Search, Eye, Mail, Phone,
-  Calendar, ShieldCheck, X, UserX, CheckCircle2, AlertCircle, Loader2
+  Calendar, ShieldCheck, X, UserX, CheckCircle2, AlertCircle, Loader2, Ban, AlertTriangle
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { cn } from "../../../lib/utils";
@@ -32,6 +32,9 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [updating, setUpdating] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
+  const [customerToBlock, setCustomerToBlock] = useState(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -50,16 +53,38 @@ export default function CustomersPage() {
     }
   };
 
-  const handleToggleStatus = async (id) => {
+  const handleToggleStatus = async (customer, isBlocking) => {
+    if (isBlocking) {
+      setCustomerToBlock(customer);
+      setBlockReason("");
+      setShowBlockModal(true);
+    } else {
+      await updateCustomerStatus(customer.customer_id, true, null);
+    }
+  };
+
+  const updateCustomerStatus = async (id, is_active, reason) => {
     setUpdating(true);
     try {
-      const resp = await api.patch(`/user/admin/customer/${id}/status`);
+      const resp = await api.patch(`/user/admin/customer/${id}/status`, { is_active, block_reason: reason });
       if (resp.data.success) {
-        toast({ title: "Status Updated", description: `Account is now ${resp.data.is_active ? 'Active' : 'Restricted'}.` });
-        setCustomers(prev => prev.map(c => c.customer_id === id ? { ...c, is_active: resp.data.is_active } : c));
+        toast({ 
+          title: is_active ? "Customer Restored" : "Customer Restricted", 
+          description: `Account access has been updated successfully.` 
+        });
+        setCustomers(prev => prev.map(c => c.customer_id === id ? { 
+          ...c, 
+          is_active: resp.data.is_active,
+          block_reason: resp.data.block_reason
+        } : c));
         if (selectedCustomer?.customer_id === id) {
-          setSelectedCustomer(prev => ({ ...prev, is_active: resp.data.is_active }));
+          setSelectedCustomer(prev => ({ 
+            ...prev, 
+            is_active: resp.data.is_active,
+            block_reason: resp.data.block_reason
+          }));
         }
+        setShowBlockModal(false);
       }
     } catch (err) {
       console.error(err);
@@ -171,18 +196,27 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-6 py-7">
                       <div className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 rounded-full w-fit border",
-                        c.is_active ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-rose-50 text-rose-600 border-rose-100"
+                        "flex flex-col items-start gap-1"
                       )}>
-                        {c.is_active ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-                        <span className="text-[9px] font-black uppercase tracking-widest">{c.is_active ? 'Active' : 'Restricted'}</span>
+                        <div className={cn(
+                          "flex items-center gap-2 px-3 py-1.5 rounded-full w-fit border",
+                          c.is_active ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-rose-50 text-rose-600 border-rose-100"
+                        )}>
+                          {c.is_active ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                          <span className="text-[9px] font-black uppercase tracking-widest">{c.is_active ? 'Active' : 'Restricted'}</span>
+                        </div>
+                        {!c.is_active && c.block_reason && (
+                          <span className="text-[8px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md max-w-[120px] truncate" title={c.block_reason}>
+                            {c.block_reason}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="pl-6 pr-10 py-7 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
                           disabled={updating}
-                          onClick={() => handleToggleStatus(c.customer_id)}
+                          onClick={() => handleToggleStatus(c, c.is_active)}
                           className={cn(
                             "h-12 w-12 rounded-2xl border flex items-center justify-center transition-all shadow-sm hover:shadow-lg",
                             c.is_active 
@@ -256,6 +290,16 @@ export default function CustomersPage() {
                 </div>
               </div>
 
+              {selectedCustomer.block_reason && !selectedCustomer.is_active && (
+                <div className="mb-10 p-6 bg-rose-50 border border-rose-100 rounded-[2rem] flex items-start gap-4">
+                  <AlertTriangle className="h-6 w-6 text-rose-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Restriction Reason</p>
+                    <p className="text-sm font-bold text-rose-700 leading-relaxed">{selectedCustomer.block_reason}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-6 mb-12">
                 {[
                   { icon: Mail, label: "Email Address", value: selectedCustomer.email, color: "text-violet-600", bg: "bg-violet-50" },
@@ -286,7 +330,7 @@ export default function CustomersPage() {
                 </Button>
                 <button 
                   disabled={updating}
-                  onClick={() => handleToggleStatus(selectedCustomer.customer_id)}
+                  onClick={() => handleToggleStatus(selectedCustomer, selectedCustomer.is_active)}
                   className={cn(
                     "px-8 h-16 rounded-[1.5rem] font-black uppercase text-[11px] tracking-[0.2em] border transition-all flex items-center justify-center",
                     selectedCustomer.is_active ? "text-rose-600 border-rose-200 hover:bg-rose-50" : "text-emerald-600 border-emerald-200 hover:bg-emerald-50"
@@ -295,6 +339,42 @@ export default function CustomersPage() {
                   {updating ? <Loader2 className="animate-spin" /> : (selectedCustomer.is_active ? <UserX size={20} /> : <UserCheck size={20} />)}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Block Reason Modal */}
+      {showBlockModal && (
+        <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-[110] p-4 backdrop-blur-2xl animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300 border border-slate-200">
+            <div className="h-20 w-20 bg-rose-50 rounded-3xl flex items-center justify-center mb-8">
+              <Ban className="h-10 w-10 text-rose-500" />
+            </div>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">Restrict Customer</h2>
+            <p className="text-slate-500 font-bold mb-8 text-sm">Please provide a reason for restricting <span className="text-slate-900">"{customerToBlock?.name}"</span>. This will be shown to the customer.</p>
+            
+            <textarea
+              className="w-full h-40 p-6 rounded-[2rem] bg-slate-50 border-none text-sm font-bold focus:ring-4 focus:ring-rose-500/10 transition-all placeholder:text-slate-300 mb-8 resize-none"
+              placeholder="e.g. Suspicious activity, payment failure, violation of terms..."
+              value={blockReason}
+              onChange={(e) => setBlockReason(e.target.value)}
+            />
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowBlockModal(false)}
+                className="flex-1 h-14 rounded-2xl bg-slate-100 text-slate-600 font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => updateCustomerStatus(customerToBlock.customer_id, false, blockReason)}
+                disabled={!blockReason.trim() || updating}
+                className="flex-1 h-14 rounded-2xl bg-rose-600 text-white font-black uppercase text-[10px] tracking-widest hover:bg-rose-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-rose-100"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : "Confirm Restrict"}
+              </button>
             </div>
           </div>
         </div>

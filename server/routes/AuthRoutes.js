@@ -16,7 +16,7 @@ import {
   verifyOTP
 } from '../controllers/AuthController/customerController.js';
 import { registerSeller, sellerOnboarding, loginSeller, logoutSeller, getSellerStats, getSellerDashboardData, getSellerOrders, getSellerCustomers, getSellerProfile, updateSellerProfile, getSellerPayments, getSellerFinanceAnalytics, getSellerNotifications, markNotificationRead } from '../controllers/AuthController/sellerController.js';
-import { registerAdmin, loginAdmin, logoutAdmin, getAdminDashboardData, getSellersData, getFinanceData, getAnalyticsData, getAllOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, getAllPayments, getAllReturns, changeAdminPassword, getAuditLogs } from '../controllers/AuthController/adminController.js';
+import { registerAdmin, loginAdmin, logoutAdmin, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, getAllPayments, getAllReturns, changeAdminPassword, getAuditLogs } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
 import { verifyToken } from '../middlewares/authMiddleware.js';
@@ -61,13 +61,17 @@ authRoutes.post('/admin/logout', logoutAdmin);
 authRoutes.get('/admin/dashboard-data', verifyToken, getAdminDashboardData);
 authRoutes.get('/admin/sellers-data', verifyToken, getSellersData);
 authRoutes.get('/admin/finance-data', verifyToken, getFinanceData);
+authRoutes.get('/admin/finance-report', verifyToken, exportFinanceReport);
 authRoutes.get('/admin/analytics-data', verifyToken, getAnalyticsData);
 authRoutes.get('/admin/orders', verifyToken, getAllOrders);
+authRoutes.post('/admin/orders/bulk-update', verifyToken, bulkUpdateOrders);
+authRoutes.post('/admin/orders/auto-dispatch', verifyToken, autoDispatchOrders);
 authRoutes.get('/admin/customers', verifyToken, getAllCustomers);
 authRoutes.get('/admin/products', verifyToken, getAdminProducts);
 authRoutes.get('/admin/payments', verifyToken, getAllPayments);
 authRoutes.get('/admin/returns', verifyToken, getAllReturns);
 authRoutes.patch('/admin/customer/:id/status', verifyToken, toggleCustomerStatus);
+authRoutes.patch('/admin/seller/:id/status', verifyToken, toggleSellerStatus);
 authRoutes.get('/admin/audit-logs', verifyToken, getAuditLogs);
 authRoutes.put('/admin/change-password/:id', verifyToken, changeAdminPassword);
 
