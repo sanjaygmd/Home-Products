@@ -2,7 +2,8 @@ import { pool } from "../../configs/db.js";
 import { createAuthSession, invalidateSession } from "../../utils/authSession.js";
 import { logAudit } from "../../utils/auditLogger.js";
 import { processAutoPayout } from "../PayoutController.js";
-import { pushOrderToShiprocket } from "../ShipmentController.js";
+import { pushOrderToShiprocket, createShiprocketReturn } from "../ShipmentController.js";
+import { sendOrderStatusNotifications } from "../../utils/notifications.js";
 
 export const registerAdmin = async (req, res) => {
   try {
@@ -15,7 +16,7 @@ export const registerAdmin = async (req, res) => {
     const adminCount = await pool.query("SELECT COUNT(*) FROM admins");
     const hasAdmins = parseInt(adminCount.rows[0].count) > 0;
 
-    const EXPECTED_MASTER_KEY = "HOME_ADMIN_2026";
+    const EXPECTED_MASTER_KEY = process.env.MASTER_SECURITY_KEY;
 
     if (hasAdmins) {
       if (!masterKey || masterKey !== EXPECTED_MASTER_KEY) {
@@ -48,7 +49,6 @@ export const registerAdmin = async (req, res) => {
        VALUES ($1, $2, $3, true, true)`,
       [admin.admin_id, admin.name, admin.email]
     );
-    console.log(`Shadow customer created for new admin: ${admin.email}`);
 
     const ip = req.ip || req.connection.remoteAddress;
     const device = { agent: req.get('User-Agent') };
@@ -107,7 +107,6 @@ export const loginAdmin = async (req, res) => {
          VALUES ($1, $2, $3, true, true)`,
         [admin.admin_id, admin.name, admin.email]
       );
-      console.log(`Shadow customer created for admin: ${admin.email}`);
     }
 
     const ip = req.ip || req.connection.remoteAddress;
@@ -624,7 +623,7 @@ export const getAnalyticsData = async (req, res) => {
       FROM products WHERE deleted_at IS NULL
       GROUP BY room ORDER BY value DESC
     `);
-    
+
     // 9. Order Status Distribution
     const statusDistributionResult = await pool.query(`
       SELECT order_status as name, COUNT(*) as value
@@ -640,8 +639,8 @@ export const getAnalyticsData = async (req, res) => {
           total_revenue: Number(summaryResult.rows[0].total_revenue),
           total_items_sold: Number(summaryResult.rows[0].total_items_sold)
         },
-        trend: trendResult.rows.map(r => ({ 
-          ...r, 
+        trend: trendResult.rows.map(r => ({
+          ...r,
           revenue: Number(r.revenue),
           costs: Number(r.costs),
           profit: Number(r.profit),
@@ -774,22 +773,26 @@ export const getAllPayments = async (req, res) => {
 };
 
 /**
- * Get All Returns (Admin View)
+ * Get All Returns (Admin View) - Synced with return_requests table
  */
 export const getAllReturns = async (req, res) => {
   try {
     const returnsQuery = `
       SELECT 
-        o.order_id as id,
+        rr.return_request_id as id,
         c.full_name as customer,
-        o.total_amount as amount,
-        o.order_status as status,
-        o.placed_at as date,
-        'Damaged Item' as reason
-      FROM orders o
-      JOIN customers c ON o.customer_id = c.customer_id
-      WHERE o.order_status = 'Cancelled' AND o.is_deleted = false
-      ORDER BY o.placed_at DESC
+        rr.refund_amount as amount,
+        rr.refund_status as status,
+        rr.requested_at as date,
+        rr.reason,
+        rr.order_id,
+        rr.return_type,
+        p.name as product_name
+      FROM return_requests rr
+      JOIN customers c ON rr.customer_id = c.customer_id
+      JOIN order_items oi ON rr.order_item_id = oi.order_item_id
+      JOIN products p ON oi.product_id = p.product_id
+      ORDER BY rr.requested_at DESC
     `;
     const result = await pool.query(returnsQuery);
 
@@ -797,15 +800,156 @@ export const getAllReturns = async (req, res) => {
       success: true,
       data: result.rows.map(r => ({
         ...r,
-        id: `RET-${r.id.split('-')[0].toUpperCase()}`,
-        orderId: r.id,
+        id: r.id, // Keep the UUID for internal use
+        displayId: `RET-${r.id.split('-')[0].toUpperCase()}`,
+        orderId: r.order_id,
         amount: `₹${Number(r.amount).toLocaleString('en-IN')}`,
-        date: new Date(r.date).toLocaleDateString('en-IN')
+        date: new Date(r.date).toLocaleDateString('en-IN'),
+        status: r.status // Pending, Approved, Rejected, etc.
       }))
     });
   } catch (error) {
     console.error("GET RETURNS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch returns" });
+  }
+};
+
+/**
+ * Resolve Return Request (Approve/Reject)
+ */
+export const resolveReturnRequest = async (req, res) => {
+  const { id } = req.params; // return_request_id
+  const { status, resolution_note, admin_id } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch return request details
+    const rrRes = await client.query(
+      `SELECT rr.*, o.address_id, oi.seller_id, oi.product_id, oi.variant_id, oi.quantity, oi.unit_price,
+              c.full_name as cust_name, c.email as cust_email, c.phone as cust_phone,
+              a.address_line_1, a.city, a.state, a.pincode, p.name as product_name
+       FROM return_requests rr
+       JOIN orders o ON rr.order_id = o.order_id
+       JOIN order_items oi ON rr.order_item_id = oi.order_item_id
+       JOIN products p ON oi.product_id = p.product_id
+       JOIN customers c ON rr.customer_id = c.customer_id
+       JOIN addresses a ON o.address_id = a.address_id
+       WHERE rr.return_request_id = $1`,
+      [id]
+    );
+
+    if (rrRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Return request not found" });
+    }
+
+    const rr = rrRes.rows[0];
+
+    // 2. Update status in return_requests
+    await client.query(
+      `UPDATE return_requests 
+       SET refund_status = $1, resolution_note = $2, resolved_by_admin_id = $3, resolved_at = NOW()
+       WHERE return_request_id = $4`,
+      [status, resolution_note, admin_id, id]
+    );
+
+    if (status === 'Approved') {
+      // 3. Initiate Shiprocket Reverse Pickup
+      // Fetch seller pickup location (where item should be returned)
+      const sellerPickup = await client.query(
+        "SELECT * FROM seller_pickup_location WHERE seller_id = $1 AND is_default = true",
+        [rr.seller_id]
+      );
+
+      if (sellerPickup.rows.length > 0) {
+        const pickup = sellerPickup.rows[0];
+
+        // Construct Shiprocket Payload for Return
+        const srPayload = {
+          order_id: `RET-${rr.return_request_id.slice(0, 8)}`,
+          order_date: new Date().toISOString().split('T')[0],
+          pickup_customer_name: rr.cust_name,
+          pickup_last_name: "",
+          pickup_address: rr.address_line_1,
+          pickup_city: rr.city,
+          pickup_state: rr.state,
+          pickup_country: "India",
+          pickup_pincode: rr.pincode,
+          pickup_email: rr.cust_email,
+          pickup_phone: rr.cust_phone,
+          shipping_customer_name: pickup.contact_name,
+          shipping_last_name: "",
+          shipping_address: pickup.address_line_1,
+          shipping_city: pickup.city,
+          shipping_state: pickup.state,
+          shipping_country: "India",
+          shipping_pincode: pickup.pincode,
+          shipping_email: pickup.email || "support@marketplace.com",
+          shipping_phone: pickup.contact_phone,
+          order_items: [
+            {
+              name: rr.product_name || "Return Item",
+              sku: rr.product_id.slice(0, 8),
+              units: rr.quantity,
+              selling_price: rr.unit_price
+            }
+          ],
+          payment_method: "Prepaid",
+          sub_total: rr.refund_amount,
+          length: 10,
+          breadth: 10,
+          height: 10,
+          weight: 0.5
+        };
+
+        try {
+          const srReturn = await createShiprocketReturn(srPayload);
+
+          if (srReturn && (srReturn.status_code === 1 || srReturn.shipment_id)) {
+            // Log reverse shipment
+            await client.query(
+              `INSERT INTO reverse_shipments (
+                    reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                    pickup_address_id, dropoff_pickup_location_id,
+                    shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+                ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 'Initiated', NOW())`,
+              [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, srReturn.order_id, srReturn.awb_code || null]
+            );
+
+            // Update order item status
+            await client.query(
+              "UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = $1",
+              [rr.order_item_id]
+            );
+          } else {
+            console.warn('Shiprocket Return Sync Warning:', srReturn);
+          }
+        } catch (srError) {
+          console.error('Shiprocket Return Sync Exception:', srError.message);
+        }
+      }
+    } else if (status === 'Rejected') {
+      // Just update the status, which was already done at step 2.
+    }
+
+    // 4. Notify Customer
+    await client.query(
+      `INSERT INTO notifications (notification_id, customer_id, type, message, created_at)
+       VALUES (gen_random_uuid(), $1, 'return_update', $2, NOW())`,
+      [rr.customer_id, `Your return request for Order #${rr.order_id.slice(0, 8).toUpperCase()} has been ${status}.`]
+    );
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: `Return request ${status} successfully.` });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("RESOLVE RETURN ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to resolve return request" });
+  } finally {
+    client.release();
   }
 };
 
@@ -895,10 +1039,10 @@ export const toggleCustomerStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Customer not found" });
     }
 
-    return res.status(200).json({ 
-      success: true, 
+    return res.status(200).json({
+      success: true,
       is_active: result.rows[0].is_active,
-      block_reason: result.rows[0].block_reason 
+      block_reason: result.rows[0].block_reason
     });
   } catch (error) {
     console.error("TOGGLE CUSTOMER STATUS ERROR:", error);
@@ -920,10 +1064,10 @@ export const toggleSellerStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Seller not found" });
     }
 
-    return res.status(200).json({ 
-      success: true, 
+    return res.status(200).json({
+      success: true,
       is_active: result.rows[0].is_active,
-      block_reason: result.rows[0].block_reason 
+      block_reason: result.rows[0].block_reason
     });
   } catch (error) {
     console.error("TOGGLE SELLER STATUS ERROR:", error);
@@ -1035,7 +1179,7 @@ export const bulkUpdateOrders = async (req, res) => {
 
     // Sync with deliveries table for bulk actions
     if (status) {
-        await pool.query(`
+      await pool.query(`
             INSERT INTO deliveries (delivery_id, order_id, courier_name, awb_code, shipping_status, dispatched_at, delivered_at, updated_at, created_at)
             SELECT gen_random_uuid(), id, $1, 'N/A', $2::varchar, 
                 CASE WHEN $2::varchar = 'Shipped' OR $2::varchar = 'Delivered' THEN NOW() ELSE NULL END,
@@ -1049,6 +1193,11 @@ export const bulkUpdateOrders = async (req, res) => {
                 delivered_at = COALESCE(deliveries.delivered_at, EXCLUDED.delivered_at),
                 updated_at = NOW()
         `, [courier || 'Bulk Update', status, orderIds]);
+
+      // Dispatch notifications to customers and sellers
+      for (const orderId of orderIds) {
+        await sendOrderStatusNotifications(orderId, status, pool, courier);
+      }
     }
 
     // Log the bulk action
@@ -1110,10 +1259,10 @@ export const exportFinanceReport = async (req, res) => {
     let runningBalance = 0;
 
     for (const row of result.rows) {
-      const date = new Date(row.created_at).toLocaleString('en-IN', { 
-        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+      const date = new Date(row.created_at).toLocaleString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
       }).replace(',', '');
-      
+
       let description = "";
       let reference = "";
       let debit = "";
@@ -1161,7 +1310,7 @@ export const autoDispatchOrders = async (req, res) => {
   try {
     // 1. Find all 'Processing' orders
     const pendingOrders = await pool.query("SELECT order_id FROM orders WHERE order_status = 'Processing' AND is_deleted = false");
-    
+
     if (pendingOrders.rows.length === 0) {
       return res.status(200).json({ success: true, message: "No pending orders to dispatch", count: 0 });
     }
@@ -1178,7 +1327,7 @@ export const autoDispatchOrders = async (req, res) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        
+
         // Intelligent Push (Order -> Serviceability -> AWB -> Pickup)
         const srData = await pushOrderToShiprocket(orderId, client);
 
@@ -1205,6 +1354,9 @@ export const autoDispatchOrders = async (req, res) => {
             updated_at = NOW()
         `, [orderId, srData.courier, srData.awb_code]);
 
+        // Send notifications
+        await sendOrderStatusNotifications(orderId, 'Shipped', client, srData.courier, srData.awb_code);
+
         await client.query('COMMIT');
         results.success++;
         results.details.push({ orderId, status: 'Success', courier: srData.courier });
@@ -1229,8 +1381,8 @@ export const autoDispatchOrders = async (req, res) => {
       req
     });
 
-    return res.status(200).json({ 
-      success: true, 
+    return res.status(200).json({
+      success: true,
       message: `Intelligent Auto-Pilot completed: ${results.success} success, ${results.failed} failed.`,
       summary: results
     });

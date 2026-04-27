@@ -629,7 +629,6 @@ const SingleProduct = () => {
             image: finalImages[0]
           }}
           onReviewSubmitted={() => {
-            console.log("REVIEW SUBMITTED! Re-fetching with variantId:", selectedVariant?.variant_id);
             fetchReviews(product.id, selectedVariant?.variant_id);
             checkEligibility(product.id); // Refresh eligibility/existing review
           }}

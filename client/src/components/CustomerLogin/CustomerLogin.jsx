@@ -42,14 +42,12 @@ const CustomerLogin = () => {
       setError("");
   
       try {
-        console.log("Attempting login for:", form.email);
+        setLoading(true);
         const res = await customerLogin({
           email: form.email,
           password: form.password,
         });
   
-        console.log("Login Response:", res);
-
         if (!res.success) {
           setError(res.message || "Invalid credentials");
           return;

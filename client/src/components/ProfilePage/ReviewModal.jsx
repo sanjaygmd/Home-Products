@@ -28,7 +28,6 @@ const ReviewModal = ({ isOpen, onClose, product, orderItemId, onReviewSubmitted,
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("SUBMITTING REVIEW. variantId prop:", variantId);
     
     if (!body.trim()) {
       toast({ variant: "destructive", title: "Error", description: "Please write something in your review." });
@@ -55,7 +54,6 @@ const ReviewModal = ({ isOpen, onClose, product, orderItemId, onReviewSubmitted,
           title,
           body
         };
-        console.log("POSTING NEW REVIEW. Full payload:", payload);
         res = await api.post('/user/customer/reviews', payload);
       }
 

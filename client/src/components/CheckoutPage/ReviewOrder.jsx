@@ -34,14 +34,14 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
 
     emailjs
       .send(
-        "service_xi1pa3f",
-        "template_yflwrps",
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
         templateParams,
-        "y1WJPO0mL8ZixdyyR",
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
       )
       .then(
         (response) => {
-          console.log("Email sent successfully", response);
+          // Success
         },
         (error) => {
           console.error("Email failed", error);
@@ -55,7 +55,6 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
       return;
     }
     try {
-      console.log("Preparing order data for items:", items);
       const orderData = {
         customer_id: user.id || user.customer_id || user.admin_id,
         address_details: userDetails,
@@ -92,7 +91,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
         }
       } else {
         const options = {
-          key: "rzp_test_ScwlLN4ZFz2Qxa",
+          key: import.meta.env.VITE_RAZORPAY_KEY,
           amount: total * 100,
           currency: "INR",
           name: "GMD Marketplace",

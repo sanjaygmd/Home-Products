@@ -64,7 +64,6 @@ const CouponsPage = () => {
         e.preventDefault();
         const user = JSON.parse(localStorage.getItem('auth'));
         const adminId = user?.admin_id || user?.id || user?.adminId;
-        console.log("Current admin user object:", user);
         const payload = { ...formData, admin_id: adminId };
         
         const res = editingCoupon 

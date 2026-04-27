@@ -151,12 +151,8 @@ export default function SettingsPage() {
 
     setPwLoading(true);
     try {
-      const resp = await fetch(`http://localhost:5000/user/admin/change-password/${currentUser?.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.next }),
-      });
-      const data = await resp.json();
+      const resp = await api.put(`/user/admin/change-password/${currentUser?.id}`, { currentPassword: passwords.current, newPassword: passwords.next });
+      const data = resp.data;
       if (data.success) {
         toast({ title: "Password Updated", description: "Your password has been changed successfully." });
         setPasswords({ current: "", next: "", confirm: "" });

@@ -217,3 +217,27 @@ export const cancelShiprocketOrder = async (srOrderIds) => {
     return { success: false, message: error.message };
   }
 };
+
+/**
+ * Create a Return Order (Reverse Pickup)
+ */
+export const createShiprocketReturn = async (returnData) => {
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(`${BASE_URL}/orders/create/return`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(returnData),
+    });
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Shiprocket Return Order Error:', error.message);
+    return { success: false, message: error.message };
+  }
+};

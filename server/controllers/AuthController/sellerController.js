@@ -173,7 +173,6 @@ export const registerSeller = async (req, res) => {
       data: result.rows[0],
     });
   } catch (error) {
-    console.log("REGISTER ERROR:", error.message);
     return res.status(500).json({
       success: false,
       message: "Registering seller failed",
@@ -276,7 +275,6 @@ export const sellerOnboarding = async (req, res) => {
     });
 
   } catch (error) {
-    console.log("Onboarding ERROR:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -386,7 +384,6 @@ export const getSellerDashboardData = async (req, res) => {
 
     // 2. If empty, fill it from existing orders
     if (dailyFinances.rows.length === 0) {
-      console.log(`Daily finances empty for seller ${sellerId}, populating from orders...`);
       await populateFinancesFromOrders(sellerId);
       
       // Re-fetch
@@ -913,7 +910,6 @@ async function ensureAllFinances(sellerId) {
       AND a.seller_id = $1
     `, [sellerId]);
     
-    console.log(`Full bidirectional aggregation successful for seller: ${sellerId}`);
   } catch (error) {
     console.error("Aggregation Error:", error.message);
   }

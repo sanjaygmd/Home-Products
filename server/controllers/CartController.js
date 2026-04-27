@@ -2,10 +2,8 @@ import { pool } from '../configs/db.js';
 
 // Helper: get or create cart for customer
 const getOrCreateCart = async (client, customer_id) => {
-  console.log('getOrCreateCart called for customer_id:', customer_id);
   const existing = await client.query('SELECT cart_id FROM cart WHERE customer_id = $1', [customer_id]);
   if (existing.rows.length > 0) {
-    console.log('Existing cart found:', existing.rows[0].cart_id);
     return existing.rows[0].cart_id;
   }
   const result = await client.query(
@@ -14,13 +12,11 @@ const getOrCreateCart = async (client, customer_id) => {
      RETURNING cart_id`,
     [customer_id]
   );
-  console.log('Created new cart with id:', result.rows[0].cart_id);
   return result.rows[0].cart_id;
 };
 
 // Helper: sync cart total_amount and item_count
 const syncCartSummary = async (client, cart_id) => {
-  console.log('syncCartSummary called for cart_id:', cart_id);
   const summary = await client.query(
     `SELECT 
         COALESCE(SUM(quantity), 0) as total_items,
@@ -40,7 +36,6 @@ const syncCartSummary = async (client, cart_id) => {
      WHERE cart_id = $3`,
     [total_amount, total_items, cart_id]
   );
-  console.log(`Cart ${cart_id} updated: items=${total_items}, amount=${total_amount}`);
 };
 
 
@@ -136,7 +131,6 @@ export const addToCart = async (req, res) => {
         await syncCartSummary(client, cart_id);
 
         await client.query('COMMIT');
-        console.log('Add to cart committed, cart_id:', cart_id);
         // Fetch updated cart items
         const cartResult = await pool.query(
             `SELECT 
@@ -168,7 +162,6 @@ export const addToCart = async (req, res) => {
             ORDER BY ci.created_at ASC`,
             [cart_id]
         );
-        console.log('Fetched cart items, count:', cartResult.rows.length);
         
         const cartInfo = await pool.query('SELECT total_amount, item_count, updated_at FROM cart WHERE cart_id = $1', [cart_id]);
 

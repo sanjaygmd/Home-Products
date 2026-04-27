@@ -7,6 +7,7 @@ import {
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useToast } from "../../../hooks/use-toast";
 import { cn } from "../../../lib/utils";
+import { api } from "../../../services/api";
 
 export default function ProfilePage() {
   const { currentUser, loginUser } = useAuth();
@@ -39,9 +40,8 @@ export default function ProfilePage() {
   }, [currentUser]);
 
   useEffect(() => {
-    fetch("http://localhost:5000/user/admin/dashboard-data")
-      .then(r => r.json())
-      .then(d => { if (d.success) setStats(d.data.stats); })
+    api.get("/user/admin/dashboard-data")
+      .then(resp => { if (resp.data.success) setStats(resp.data.data.stats); })
       .catch(() => {});
   }, []);
 
@@ -56,13 +56,9 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`http://localhost:5000/user/admin/profile/${currentUser?.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-      const data = await resp.json();
-      if (resp.ok) {
+      const resp = await api.put(`/user/admin/profile/${currentUser?.id}`, formData);
+      const data = resp.data;
+      if (resp.status === 200) {
         loginUser(data.user);
         toast({ title: "Profile Updated", description: "Your details have been saved." });
         setIsEditing(false);

@@ -11,6 +11,7 @@ import { useAdminSearch } from "../../admin/contexts/AdminSearchContext";
 import { useState, useMemo, useEffect } from "react";
 import ProductViewModal from "../../common/ProductViewModal";
 import { cn } from "../../../lib/utils";
+import { api } from "../../../services/api";
 
 const CHART_COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#ec4899', '#06b6d4'];
 
@@ -66,9 +67,8 @@ export default function ProductsPage() {
   const fetchAdminProducts = async () => {
     setLoading(true);
     try {
-      const resp = await fetch('http://localhost:5000/user/admin/products');
-      const data = await resp.json();
-      setProducts(Array.isArray(data) ? data : []);
+      const resp = await api.get('/user/admin/products');
+      setProducts(Array.isArray(resp.data) ? resp.data : []);
     } catch (err) {
       console.error('Fetch products failed:', err);
       setProducts([]);

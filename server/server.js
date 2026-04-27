@@ -22,7 +22,7 @@ const port = process.env.PORT || 5000
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
     credentials: true
 }));
 
@@ -36,6 +36,16 @@ app.use('/cart', cartRoutes);
 app.use('/wishlist', wishlistRoutes);
 app.use('/order', orderRoutes);
 app.use('/shipping', shiprocketRoutes);
+
+import { pool } from './configs/db.js';
+app.get('/schema-test', async (req, res) => {
+    try {
+        const result = await pool.query("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_name IN ('return_requests', 'reverse_shipments', 'deliveries', 'returns') ORDER BY table_name, ordinal_position;");
+        res.json(result.rows);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
 app.get('/', (req, res) => res.send('SERVER IS ALIVE'));
 

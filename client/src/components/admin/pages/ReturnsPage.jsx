@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
+import { api } from "../../../services/api";
 
 const ReturnStatCard = ({ title, value, label, icon: Icon, color }) => (
   <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
@@ -40,10 +41,9 @@ export default function ReturnsPage() {
   const fetchReturns = async () => {
     setLoading(true);
     try {
-      const resp = await fetch('http://localhost:5000/user/admin/returns');
-      const data = await resp.json();
-      if (data.success) {
-        setReturns(data.data);
+      const resp = await api.get('/user/admin/returns');
+      if (resp.data.success) {
+        setReturns(resp.data.data);
       }
     } catch (err) {
       console.error(err);
@@ -53,9 +53,34 @@ export default function ReturnsPage() {
     }
   };
 
+  const handleResolveReturn = async (id, status) => {
+    try {
+      const auth = JSON.parse(localStorage.getItem("auth"));
+      const adminId = auth?.admin_id || auth?.id;
+
+      const resp = await api.post(`/user/admin/returns/${id}/resolve`, { 
+        status, 
+        resolution_note: status === 'Approved' ? 'Return request approved by admin' : 'Return request rejected by admin',
+        admin_id: adminId
+      });
+      
+      if (resp.data.success) {
+        toast({ title: `Return ${status}`, description: resp.data.message });
+        fetchReturns();
+        setSelectedReturn(null);
+      } else {
+        toast({ title: "Action Failed", description: resp.data.message, variant: "destructive" });
+      }
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "An error occurred while resolving the request.", variant: "destructive" });
+    }
+  };
+
   const filteredReturns = useMemo(() => {
     return returns.filter((r) =>
       r.id.toLowerCase().includes(search.toLowerCase()) ||
+      r.displayId?.toLowerCase().includes(search.toLowerCase()) ||
       r.orderId.toLowerCase().includes(search.toLowerCase()) ||
       r.customer.toLowerCase().includes(search.toLowerCase())
     );
@@ -238,14 +263,14 @@ export default function ReturnsPage() {
               <div className="flex gap-4">
                 <Button 
                   className="flex-1 h-16 rounded-[1.5rem] bg-slate-950 text-white font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
-                  onClick={() => toast({ title: "Return Approved", description: "The pickup request has been initiated." })}
+                  onClick={() => handleResolveReturn(selectedReturn.id, 'Approved')}
                 >
                   Approve Return
                 </Button>
                 <Button 
                   variant="outline"
                   className="flex-1 h-16 rounded-[1.5rem] border-slate-200 text-slate-600 font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-50 transition-all"
-                  onClick={() => toast({ title: "Request Rejected", description: "The customer has been notified of the rejection." })}
+                  onClick={() => handleResolveReturn(selectedReturn.id, 'Rejected')}
                 >
                   Reject Request
                 </Button>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { X, Package, MapPin, CreditCard, Clock, CheckCircle, Truck, AlertCircle } from "lucide-react";
-import { getOrderDetails, cancelOrder } from "../../services/orderService";
+import { X, Package, MapPin, CreditCard, Clock, CheckCircle, Truck, AlertCircle, RotateCcw, Image as ImageIcon, Loader2 } from "lucide-react";
+import { getOrderDetails, cancelOrder, createReturnRequest } from "../../services/orderService";
 
 const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
   const [order, setOrder] = useState(null);
@@ -8,6 +8,13 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+
+  // Return logic state
+  const [showReturnForm, setShowReturnForm] = useState(false);
+  const [selectedItemForReturn, setSelectedItemForReturn] = useState(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnType, setReturnType] = useState("Refund");
+  const [returning, setReturning] = useState(false);
 
   useEffect(() => {
     if (orderId) {
@@ -50,6 +57,49 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
     }
   };
 
+  const handleInitiateReturn = (item) => {
+    setSelectedItemForReturn(item);
+    setShowReturnForm(true);
+  };
+
+  const handleSubmitReturn = async () => {
+    if (!returnReason.trim()) {
+      alert("Please provide a reason for return");
+      return;
+    }
+
+    setReturning(true);
+    const auth = JSON.parse(localStorage.getItem("auth"));
+
+    try {
+      const res = await createReturnRequest({
+        order_id: orderId,
+        order_item_id: selectedItemForReturn.order_item_id,
+        customer_id: auth?.id,
+        reason: returnReason,
+        return_type: returnType,
+        photos: [] // Placeholder for photos
+      });
+
+      if (res.success) {
+        alert("Return request submitted successfully!");
+        setShowReturnForm(false);
+        setSelectedItemForReturn(null);
+        setReturnReason("");
+        // Refresh order details to show new item status
+        const refresh = await getOrderDetails(orderId);
+        if (refresh.success) setOrder(refresh.data);
+      } else {
+        alert(res.message || "Failed to submit return request");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("An error occurred while submitting the return request.");
+    } finally {
+      setReturning(false);
+    }
+  };
+
   if (!orderId) return null;
 
   const getStatusConfig = (status) => {
@@ -64,11 +114,85 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
   };
 
   const canCancel = order && (order.order_status === "Pending" || order.order_status === "Processing");
+  const isDelivered = order && order.order_status === "Delivered";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col relative">
         
+        {/* RETURN FORM OVERLAY */}
+        {showReturnForm && selectedItemForReturn && (
+          <div className="absolute inset-0 z-[60] bg-white animate-in slide-in-from-bottom duration-300 flex flex-col">
+            <div className="p-6 border-b flex justify-between items-center">
+              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <RotateCcw className="text-rose-600" />
+                Return Request
+              </h3>
+              <button onClick={() => setShowReturnForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full space-y-8">
+              <div className="flex items-center gap-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <img src={selectedItemForReturn.images?.[0]} className="w-20 h-20 object-cover rounded-xl border shadow-sm" alt="" />
+                <div>
+                  <p className="font-bold text-lg text-slate-900">{selectedItemForReturn.product_name}</p>
+                  <p className="text-sm text-slate-500">{selectedItemForReturn.variant_name}: {selectedItemForReturn.variant_value}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <label className="block text-sm font-black uppercase tracking-widest text-slate-400">Reason for Return</label>
+                <select 
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  className="w-full p-4 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-rose-100 transition"
+                >
+                  <option value="">Select a reason...</option>
+                  <option value="Damaged Product">Damaged Product</option>
+                  <option value="Wrong Item Received">Wrong Item Received</option>
+                  <option value="Quality not as expected">Quality not as expected</option>
+                  <option value="Size/Fit Issue">Size/Fit Issue</option>
+                  <option value="No longer needed">No longer needed</option>
+                </select>
+                <textarea 
+                  placeholder="Additional details about the issue..."
+                  className="w-full p-4 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-rose-100 min-h-[120px] resize-none"
+                  value={returnReason === "Other" ? "" : returnReason} // Simplified for demo
+                  onChange={(e) => setReturnReason(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <label className="block text-sm font-black uppercase tracking-widest text-slate-400">Return Type</label>
+                <div className="flex gap-4">
+                  {["Refund", "Replacement"].map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setReturnType(type)}
+                      className={`flex-1 p-4 rounded-xl border font-bold text-sm transition ${
+                        returnType === type ? "bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-100" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-6">
+                <button 
+                  onClick={handleSubmitReturn}
+                  disabled={returning || !returnReason}
+                  className="w-full h-16 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-slate-800 transition active:scale-95 disabled:opacity-50 shadow-xl shadow-slate-200"
+                >
+                  {returning ? <Loader2 className="animate-spin" /> : "Submit Return Request"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* HEADER */}
         <div className="p-6 border-b flex justify-between items-center bg-gray-50/50">
           <div>
@@ -106,7 +230,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        <div className="flex-1 overflow-y-auto p-6 space-y-8 no-scrollbar">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20">
               <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -185,7 +309,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
                         <th className="px-6 py-4">Item</th>
                         <th className="px-6 py-4 text-center">Qty</th>
                         <th className="px-6 py-4 text-right">Price</th>
-                        <th className="px-6 py-4 text-right">Total</th>
+                        <th className="px-6 py-4 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-sm">
@@ -197,12 +321,28 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
                               <div>
                                 <p className="font-bold text-gray-900">{item.product_name}</p>
                                 {item.variant_name && <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">{item.variant_name}: {item.variant_value}</p>}
+                                {item.item_status && item.item_status !== 'Delivered' && (
+                                  <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md border border-rose-100 inline-block mt-1">
+                                    {item.item_status}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
                           <td className="px-6 py-4 text-center font-bold text-gray-600">{item.quantity}</td>
-                          <td className="px-6 py-4 text-right">₹{item.unit_price}</td>
                           <td className="px-6 py-4 text-right font-bold text-gray-900">₹{item.total_price}</td>
+                          <td className="px-6 py-4 text-right">
+                            {isDelivered && (!item.item_status || item.item_status === 'Delivered') ? (
+                              <button 
+                                onClick={() => handleInitiateReturn(item)}
+                                className="px-3 py-1.5 bg-white border border-rose-100 text-rose-600 text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-rose-600 hover:text-white transition shadow-sm"
+                              >
+                                Return
+                              </button>
+                            ) : (
+                              <span className="text-gray-300 text-[10px] font-bold uppercase tracking-widest">N/A</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -217,7 +357,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
                     <MapPin size={20} className="text-blue-600" />
                     Delivery Address
                   </h3>
-                  <div className="bg-gray-50 p-6 rounded-2xl text-sm text-gray-600 space-y-1">
+                  <div className="bg-gray-50 p-6 rounded-2xl text-sm text-gray-600 space-y-1 border border-gray-100">
                     <p className="font-bold text-gray-900 text-base mb-1">{order.shipping_name}</p>
                     <p>{order.address_line_1}</p>
                     <p>{order.city}, {order.state} - {order.pincode}</p>

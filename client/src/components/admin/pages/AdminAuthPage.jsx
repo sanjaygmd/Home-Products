@@ -172,7 +172,7 @@ export default function AdminAuthPage() {
     const successMsg = isLogin ? "Welcome back, Admin!" : "Admin setup successful!";
 
     try {
-      const resp = await fetch(`http://localhost:5000${endpoint}`, {
+      const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData)

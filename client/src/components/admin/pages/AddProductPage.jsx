@@ -11,6 +11,7 @@ import {
 import { useProducts } from "../../../context/ProductContext/ProductProvider";
 import { useToast } from "../../../hooks/use-toast";
 import { cn } from "../../../lib/utils";
+import { api } from "../../../services/api";
 
 const inputClass = "w-full h-14 px-5 rounded-[1.25rem] bg-slate-50 border border-slate-200 focus:ring-4 focus:ring-violet-500/10 focus:border-violet-500 outline-none transition-all text-sm font-bold text-slate-800";
 const labelClass = "text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block ml-1";
@@ -60,22 +61,16 @@ export default function AddProductPage() {
   const fetchInitialData = useCallback(async () => {
     try {
       const [catRes, selRes] = await Promise.all([
-        fetch('http://localhost:5000/product/categories'),
-        fetch('http://localhost:5000/user/admin/sellers-data')
+        api.get('/product/categories'),
+        api.get('/user/admin/sellers-data')
       ]);
       
-      if (catRes.ok) {
-        const result = await catRes.json();
-        if (result.success && Array.isArray(result.data)) {
-          setCategories(result.data.filter(c => !c.parent_category_id));
-        }
+      if (catRes.data.success) {
+        setCategories(catRes.data.data.filter(c => !c.parent_category_id));
       }
 
-      if (selRes.ok) {
-        const result = await selRes.json();
-        if (result.success && Array.isArray(result.data)) {
-          setSellers(result.data);
-        }
+      if (selRes.data.success) {
+        setSellers(selRes.data.data);
       }
     } catch (err) {
       console.error("Failed to fetch initial data:", err);
@@ -95,12 +90,9 @@ export default function AddProductPage() {
         let existing = products.find(p => String(p.id) === String(id) || String(p.product_id) === String(id));
         
         // Always fetch fresh for Admin Edit to ensure variants are latest
-        const res = await fetch(`http://localhost:5000/product/${id}`);
-        if (res.ok) {
-          const result = await res.json();
-          if (result.success && result.data) {
-            existing = result.data;
-          }
+        const res = await api.get(`/product/${id}`);
+        if (res.data.success && res.data.data) {
+          existing = res.data.data;
         }
 
         if (existing) {
@@ -170,8 +162,6 @@ export default function AddProductPage() {
     const baseSku = form.sku || form.name.substring(0, 5).toUpperCase().replace(/\s+/g, '') || 'PROD';
     const entropy = Math.random().toString(36).substr(2, 6).toUpperCase();
     const variantSku = currentVariant.sku || `${baseSku}-${currentVariant.value.toUpperCase().replace(/\s+/g, '-')}-${entropy}`;
-    
-    console.log("GENERATED VARIANT SKU:", variantSku);
     setVariants([...variants, { ...currentVariant, sku: variantSku, tempId }]);
     setCurrentVariant({ ...currentVariant, value: "", sku: "" });
   };
@@ -268,8 +258,6 @@ export default function AddProductPage() {
       variants: variants,
       is_active: true
     };
-
-    console.log("DEPLOYING PRODUCT PAYLOAD:", payload);
 
     try {
       let res;

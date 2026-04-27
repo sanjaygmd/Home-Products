@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { inputStyle, primaryBtn, secondaryBtn, cardStyle } from "../../../../utils/UIStyles";
-import axios from "axios";
+import { api } from "../../../../services/api";
 
 const KYCPage = ({ back, data, setData }) => {
 
@@ -20,7 +20,7 @@ const KYCPage = ({ back, data, setData }) => {
   try {
     const seller = JSON.parse(localStorage.getItem("seller"));
 
-    await axios.post(`http://localhost:5000/user/seller-onboarding/${seller.seller_id}`, data);
+    await api.post(`/user/seller-onboarding/${seller.seller_id}`, data);
 
     navigate("/seller");
 

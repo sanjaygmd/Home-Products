@@ -41,8 +41,7 @@ const EditProduct = ({ product, onClose }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      console.log("FRONTEND: SUBMITTING EDIT FOR PRODUCT:", product);
-      console.log("FRONTEND: FORM DATA:", form);
+      setLoading(true);
       
       const sanitizedForm = { ...form };
       ['price', 'mrp', 'stock_quantity', 'weight', 'length', 'breadth', 'height'].forEach(key => {
@@ -53,15 +52,12 @@ const EditProduct = ({ product, onClose }) => {
 
       let res;
       if (product.isVariant) {
-        console.log("FRONTEND: UPDATING VARIANT WITH ID:", product.variantId);
         res = await updateVariant(product.variantId, sanitizedForm);
       } else {
-        console.log("FRONTEND: UPDATING BASE PRODUCT WITH ID:", product.product_id || product.id);
         res = await updateProduct(product.product_id || product.id, sanitizedForm);
       }
 
       if (res.success) {
-        console.log("FRONTEND: UPDATE SUCCESSFUL");
         if (product.seller_id) {
           await fetchSellerProducts(product.seller_id);
         }

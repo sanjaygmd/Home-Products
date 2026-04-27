@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
+import { api } from "../../../services/api";
 
 const PaymentStatCard = ({ title, value, label, icon: Icon, color }) => (
   <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
@@ -42,11 +43,10 @@ export default function PaymentsPage() {
   const fetchPayments = async () => {
     setLoading(true);
     try {
-      const resp = await fetch('http://localhost:5000/user/admin/payments');
-      const data = await resp.json();
-      if (data.success) {
-        setPayments(data.data);
-        setStats(data.stats);
+      const resp = await api.get('/user/admin/payments');
+      if (resp.data.success) {
+        setPayments(resp.data.data);
+        setStats(resp.data.stats);
       }
     } catch (err) {
       console.error(err);

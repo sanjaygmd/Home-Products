@@ -296,7 +296,7 @@ export const processAutoPayout = async (orderId) => {
             // 4. Log to finance transactions
             await client.query(`
                 INSERT INTO finance_transactions (
-                    transaction_id, seller_payout_id, transaction_type, amount, created_at
+                    finance_transactions_id, seller_payout_id, transaction_type, amount, created_at
                 ) VALUES (gen_random_uuid(), $1, 'payout', $2, NOW())
             `, [payoutId, amount]);
         }

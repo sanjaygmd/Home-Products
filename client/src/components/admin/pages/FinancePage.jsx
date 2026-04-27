@@ -46,18 +46,12 @@ export default function FinancePage() {
   const handleDownloadReport = async () => {
     try {
       const year = new Date().getFullYear();
-      const auth = JSON.parse(localStorage.getItem("auth"));
-      const seller = JSON.parse(localStorage.getItem("seller"));
-      const directToken = localStorage.getItem("token");
-      const token = auth?.token || seller?.token || directToken;
-
-      const resp = await fetch(`http://localhost:5000/user/admin/finance-report?year=${year}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      
+      const resp = await api.get(`/user/admin/finance-report?year=${year}`, {
+        responseType: 'blob'
       });
       
-      if (!resp.ok) throw new Error("Failed to download");
-      
-      const blob = await resp.blob();
+      const blob = new Blob([resp.data], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

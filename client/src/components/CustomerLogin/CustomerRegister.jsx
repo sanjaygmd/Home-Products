@@ -52,9 +52,7 @@ const CustomerRegister = () => {
     setError("");
 
     try {
-      console.log("Sending OTP to:", form.email);
       const res = await sendOtp({ email: form.email, purpose: "registration" });
-      console.log("OTP Send Response:", res);
       if (res.success) {
         setStep(2);
       } else {

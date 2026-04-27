@@ -5,8 +5,14 @@ import {
     cancelShiprocketOrder,
     getShiprocketServiceability,
     assignShiprocketAWB,
-    generateShiprocketPickup
+    generateShiprocketPickup,
+    createShiprocketReturn as srCreateReturn
 } from '../utils/shiprocket.js';
+
+export const createShiprocketReturn = async (payload) => {
+    return await srCreateReturn(payload);
+};
+import { sendOrderStatusNotifications } from '../utils/notifications.js';
 
 /**
  * Intelligent Auto-Pilot: Create SR Order -> Choose Best Courier -> Assign AWB -> Schedule Pickup
@@ -57,10 +63,31 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
     const nameParts = (order.full_name || "Customer").trim().split(/\s+/);
     const firstName = nameParts[0] || "Customer";
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
-    const validPhone = order.phone && order.phone.length >= 10 ? order.phone : "9999999999";
+    let cleanedPhone = order.phone ? order.phone.replace(/\D/g, '') : '';
+    if (cleanedPhone.length > 10 && cleanedPhone.startsWith('91')) {
+        cleanedPhone = cleanedPhone.substring(cleanedPhone.length - 10);
+    }
+    const validPhone = cleanedPhone.length >= 10 ? cleanedPhone.substring(0, 10) : "9876543210";
     
     console.log(`\n[SHIPROCKET LOG] Initiating dispatch for Order ID: ${orderId}`);
     console.log(`[SHIPROCKET LOG] Fetched ${items.length} items. Pickup location: ${pickupLocation.location_name}`);
+
+    const srOrderItems = items.map(item => ({
+        name: item.product_name,
+        sku: item.sku || item.product_id.slice(0, 8),
+        units: item.quantity,
+        selling_price: Number(item.unit_price)
+    }));
+
+    const additionalFees = Number(order.tax_amount || 0) + Number(order.platform_fee || 0) + Number(order.cod_fee || 0);
+    if (additionalFees > 0) {
+        srOrderItems.push({
+            name: "Taxes & Platform Fees",
+            sku: "TAX-FEE",
+            units: 1,
+            selling_price: additionalFees
+        });
+    }
 
     const srPayload = {
         order_id: order.order_id.toString().slice(0, 20),
@@ -76,25 +103,19 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
         billing_email: order.email,
         billing_phone: validPhone,
         shipping_is_billing: true,
-        order_items: items.map(item => ({
-            name: item.product_name,
-            sku: item.sku || item.product_id.slice(0, 8),
-            units: item.quantity,
-            selling_price: Number(item.unit_price)
-        })),
+        order_items: srOrderItems,
         payment_method: order.payment_method === 'cod' ? 'COD' : 'Prepaid',
-        sub_total: Number(order.subtotal),
+        sub_total: Number(order.subtotal) + additionalFees,
+        shipping_charges: Number(order.shipping_charges || 0),
+        total_discount: Number(order.discount_amount || 0),
         length: Math.max(...items.map(i => Number(i.length) || 10)),
         breadth: Math.max(...items.map(i => Number(i.breadth) || 10)),
         height: Math.max(...items.map(i => Number(i.height) || 10)),
         weight: items.reduce((acc, i) => acc + (Number(i.weight) || 0.5) * i.quantity, 0)
     };
 
-    console.log(`[SHIPROCKET LOG] Request Payload:`, JSON.stringify(srPayload, null, 2));
-
     // 5. STEP 1: Create Order in Shiprocket
     const srOrderRes = await createShiprocketOrder(srPayload);
-    console.log(`[SHIPROCKET LOG] API Response:`, JSON.stringify(srOrderRes, null, 2));
 
     if (!srOrderRes || !srOrderRes.order_id) {
         throw new Error(srOrderRes.message || "Shiprocket: Failed to create order. Check terminal for raw API response.");
@@ -176,6 +197,9 @@ export const initiateShipment = async (req, res) => {
         await client.query(`
             UPDATE orders SET order_status = 'Processing', courier = 'Shiprocket', tracking_id = $1 WHERE order_id = $2
         `, [srResponse.shipment_id.toString(), orderId]);
+
+        // Dispatch notifications
+        await sendOrderStatusNotifications(orderId, 'Processing', client);
 
         await client.query('COMMIT');
         console.log(`[SHIPROCKET LOG] SUCCESS: Order ${orderId} successfully dispatched!`);
@@ -273,5 +297,115 @@ export const syncTracking = async (req, res) => {
         return res.status(200).json({ success: true, data: tracking });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Handle incoming webhooks from Shiprocket
+ */
+export const handleShiprocketWebhook = async (req, res) => {
+    // Shiprocket expects a 200 OK fast.
+    res.status(200).send('OK');
+
+    const payload = req.body;
+    if (!payload || !payload.awb) return;
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Log the webhook payload
+        await client.query(`
+            INSERT INTO shiprocket_webhook_log (webhook_id, sr_order_id, event_type, raw_payload, is_processed, received_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, true, NOW())
+        `, [payload.order_id?.toString() || null, payload.current_status, JSON.stringify(payload)]);
+
+        // 2. Extract Data
+        const awb = payload.awb;
+        const currentStatus = payload.current_status?.toUpperCase() || '';
+        const shipmentId = payload.shipment_id?.toString();
+        const srOrderId = payload.order_id?.toString();
+        const courierName = payload.courier_name || '';
+
+        // 3. Find our local order ID
+        let localOrderId = null;
+        if (srOrderId) {
+            const srRes = await client.query('SELECT order_id FROM shiprocket_orders WHERE sr_order_id = $1', [srOrderId]);
+            if (srRes.rows.length > 0) localOrderId = srRes.rows[0].order_id;
+        }
+
+        if (!localOrderId && payload.channel_order_id) {
+            localOrderId = payload.channel_order_id; // Usually channel_order_id is our local order UUID
+        }
+
+        if (!localOrderId) {
+            await client.query('ROLLBACK');
+            return;
+        }
+
+        // 4. Update shiprocket_orders with AWB if missing
+        await client.query(`
+            UPDATE shiprocket_orders 
+            SET awb_code = $1, courier_name = COALESCE(NULLIF($2, ''), courier_name), sr_status = $3, updated_at = NOW()
+            WHERE order_id = $4
+        `, [awb, courierName, currentStatus, localOrderId]);
+
+        // 5. Update shiprocket_tracking
+        await client.query(`
+            INSERT INTO shiprocket_tracking (tracking_id, sr_order_id, awb_code, current_status, activity_log, updated_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
+        `, [srOrderId, awb, currentStatus, JSON.stringify(payload.scans || [])]);
+
+        // 6. Map Shiprocket Status to Local Status
+        let newLocalStatus = null;
+        if (['SHIPPED', 'IN TRANSIT', 'OUT FOR DELIVERY', 'PICKED UP'].includes(currentStatus)) {
+            newLocalStatus = 'Shipped';
+        } else if (currentStatus === 'DELIVERED') {
+            newLocalStatus = 'Delivered';
+        } else if (currentStatus === 'CANCELED' || currentStatus === 'CANCELLED') {
+            newLocalStatus = 'Cancelled';
+        }
+
+        // 7. Update Main Orders Table and Deliveries Table
+        if (newLocalStatus) {
+            // Check if status is actually changing to avoid spamming notifications
+            const currentOrder = await client.query('SELECT order_status FROM orders WHERE order_id = $1', [localOrderId]);
+            const isStatusChanging = currentOrder.rows.length > 0 && currentOrder.rows[0].order_status !== newLocalStatus;
+
+            if (isStatusChanging) {
+                await client.query(`
+                    UPDATE orders 
+                    SET order_status = $1, tracking_id = $2, courier = COALESCE(NULLIF($3, ''), courier), updated_at = NOW()
+                    WHERE order_id = $4
+                `, [newLocalStatus, awb, courierName, localOrderId]);
+
+                // Sync Deliveries table
+                await client.query(`
+                    INSERT INTO deliveries (delivery_id, order_id, courier_name, awb_code, shipping_status, dispatched_at, delivered_at, updated_at, created_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, 
+                        CASE WHEN $4 = 'Shipped' OR $4 = 'Delivered' THEN NOW() ELSE NULL END,
+                        CASE WHEN $4 = 'Delivered' THEN NOW() ELSE NULL END,
+                        NOW(), NOW()
+                    )
+                    ON CONFLICT (order_id) DO UPDATE SET
+                        courier_name = EXCLUDED.courier_name,
+                        awb_code = EXCLUDED.awb_code,
+                        shipping_status = EXCLUDED.shipping_status,
+                        dispatched_at = COALESCE(deliveries.dispatched_at, EXCLUDED.dispatched_at),
+                        delivered_at = COALESCE(deliveries.delivered_at, EXCLUDED.delivered_at),
+                        updated_at = NOW()
+                `, [localOrderId, courierName || 'Shiprocket', awb, newLocalStatus]);
+
+                // 8. Trigger Notifications
+                await sendOrderStatusNotifications(localOrderId, newLocalStatus, client, courierName, awb);
+            }
+        }
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error("Shiprocket Webhook Processing Error:", err.message);
+    } finally {
+        client.release();
     }
 };

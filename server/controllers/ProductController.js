@@ -137,9 +137,6 @@ export const addProduct = async (req, res) => {
 export const getProducts = async (req, res) => {
     try {
         const { seller_id } = req.query;
-        console.log("-----------------------------------------");
-        console.log("BACKEND: GET PRODUCTS REQUEST");
-        console.log("SELLER_ID FROM QUERY:", seller_id);
 
         let query = `
             SELECT p.*, 
@@ -155,16 +152,11 @@ export const getProducts = async (req, res) => {
         if (seller_id && seller_id !== 'null' && seller_id !== 'undefined' && seller_id !== '') {
             query += ` AND p.seller_id = $1::uuid`;
             queryParams.push(seller_id);
-            console.log("FILTERING BY SELLER_ID:", seller_id);
-        } else {
-            console.log("NO SELLER_ID FILTER APPLIED");
         }
 
         query += ` ORDER BY p.created_at DESC`;
 
         const result = await pool.query(query, queryParams);
-        console.log("TOTAL PRODUCTS FOUND:", result.rows.length);
-        console.log("-----------------------------------------");
 
         return res.status(200).json({
             success: true,
@@ -473,8 +465,6 @@ export const deleteProduct = async (req, res) => {
 export const updateVariant = async (req, res) => {
     const { variant_id } = req.params;
     const body = req.body;
-    console.log("BACKEND: UPDATE VARIANT REQUEST FOR ID:", variant_id);
-    console.log("BACKEND: UPDATE VARIANT BODY:", JSON.stringify(body, null, 2));
 
     const { 
         variant_name, variant_value, price, stock_quantity, sku, weight,
@@ -509,13 +499,11 @@ export const updateVariant = async (req, res) => {
         );
 
         if (vResult.rows.length === 0) {
-            console.log("BACKEND: VARIANT NOT FOUND IN DB:", variant_id);
             await client.query('ROLLBACK');
             return res.status(404).json({ success: false, message: 'Variant not found' });
         }
 
         const variant = vResult.rows[0];
-        console.log("BACKEND: VARIANT UPDATED SUCCESSFULLY:", variant.variant_id);
 
         // 2. Log the action
         await logAction(req, 'UPDATE_VARIANT', { variant_id, product_id: variant.product_id, updates: req.body });

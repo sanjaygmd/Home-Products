@@ -22,9 +22,7 @@ const OrderSummary = ({
     if (!couponCode) return;
     setLoading(true);
     setError("");
-    console.log("Validating coupon:", couponCode, "with subtotal:", subtotal);
     const res = await validateCoupon(couponCode, subtotal);
-    console.log("Validation result:", res);
     if (res.success) {
       setAppliedCoupon(res.data);
       if (onCouponApply) onCouponApply(res.data);

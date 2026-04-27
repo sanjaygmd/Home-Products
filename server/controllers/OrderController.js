@@ -19,8 +19,6 @@ export const createOrder = async (req, res) => {
       coupon_id = null
     } = req.body;
 
-    console.log("Placing order for customer:", customer_id);
-
     // Failsafe: Check if user is an admin
     const adminCheck = await pool.query("SELECT admin_id FROM admins WHERE admin_id = $1", [customer_id]);
     if (adminCheck.rows.length > 0) {
@@ -47,9 +45,6 @@ export const createOrder = async (req, res) => {
     // 2. Insert into orders
     const payment_status = payment_method === 'cod' ? 'Pending' : 'Paid';
 
-    // DEBUG: Log incoming values
-    console.log("[ORDER DEBUG] Subtotal:", subtotal, "Tax:", tax_amount, "Platform Fee:", req.body.platform_fee);
-
     // Automatic calculation of fees to ensure they are never 0 for new orders
     const subtotal_val = parseFloat(subtotal) || 0;
     const final_platform_fee = parseFloat(req.body.platform_fee) || 10;
@@ -67,7 +62,6 @@ export const createOrder = async (req, res) => {
 
     // Update coupon usage count if applicable
     if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
-      console.log(`[ORDER] Processing coupon usage for ID: ${coupon_id}`);
       try {
         await client.query(
           "UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1",
@@ -79,22 +73,15 @@ export const createOrder = async (req, res) => {
           "INSERT INTO coupon_usage (usage_id, coupon_id, customer_id, order_id, used_at) VALUES (gen_random_uuid(), $1, $2, $3, NOW())",
           [coupon_id, customer_id, order_id]
         );
-        console.log(`[ORDER] Coupon usage recorded successfully.`);
       } catch (couponError) {
         console.error("[ORDER] Failed to update coupon usage:", couponError.message);
       }
-    } else {
-      console.log("[ORDER] No valid coupon_id provided for this order.");
     }
 
     // 3. Insert into order_items, update stock, and track seller totals
-    const sellerSubtotals = {};
     const commissionRate = 0.10; // Default 10%
 
-    console.log("Order items to process:", items);
-
     for (const item of items) {
-      console.log(`Processing item: Product ${item.product_id}, Variant ${item.variant_id}, Qty ${item.quantity}`);
 
       // a. Insert order item
       const orderItemRes = await client.query(
@@ -112,33 +99,26 @@ export const createOrder = async (req, res) => {
       const vId = (rawVId && rawVId !== 'null' && rawVId !== '') ? rawVId : null;
 
       if (vId) {
-        console.log(`Attempting to update variant stock. ID: ${vId}, Qty: ${qty}`);
         const vUpdate = await client.query(
           `UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2 RETURNING stock_quantity`,
           [qty, vId]
         );
         if (vUpdate.rowCount === 0) {
           console.error(`ERROR: Variant ID ${vId} NOT FOUND in product_variants table.`);
-        } else {
-          console.log(`SUCCESS: Variant ${vId} stock decreased. Remaining:`, vUpdate.rows[0].stock_quantity);
         }
       } else {
-        console.log(`Attempting to update base product stock. ID: ${item.product_id}, Qty: ${qty}`);
         const pUpdate = await client.query(
           `UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2 RETURNING stock_quantity`,
           [qty, item.product_id]
         );
         if (pUpdate.rowCount === 0) {
           console.error(`ERROR: Product ID ${item.product_id} NOT FOUND in products table.`);
-        } else {
-          console.log(`SUCCESS: Product ${item.product_id} stock decreased. Remaining:`, pUpdate.rows[0].stock_quantity);
         }
       }
 
       // c. Get Seller ID (Lookup if missing)
       let itemSellerId = item.seller_id;
       if (!itemSellerId || itemSellerId === 'null' || itemSellerId === 'undefined') {
-        console.log("Looking up missing seller_id for product:", item.product_id);
         const prodRes = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [item.product_id]);
         if (prodRes.rows.length > 0) {
           itemSellerId = prodRes.rows[0].seller_id;
@@ -231,17 +211,13 @@ export const createOrder = async (req, res) => {
 
     await client.query('COMMIT');
 
-    /* 
     // 9. Sync with Shiprocket (Background/Async)
     try {
-        console.log(`Syncing order ${order_id} with Shiprocket...`);
-        const srSync = await pushOrderToShiprocket(order_id);
-        console.log(`Shiprocket Sync Success: ${srSync.shipment_id}`);
+        await pushOrderToShiprocket(order_id);
     } catch (srError) {
         console.error("Shiprocket Auto-Sync Error:", srError.message);
         // We don't fail the order if Shiprocket fails, but we log it.
     }
-    */
 
     res.status(201).json({
       success: true,
@@ -464,3 +440,80 @@ export const updateOrderStatus = async (req, res) => {
     client.release();
   }
 };
+
+/**
+ * Create a Return Request (Customer Side)
+ */
+export const createReturnRequest = async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { order_id, order_item_id, customer_id, reason, return_type } = req.body;
+
+        if (!order_id || !order_item_id || !customer_id || !reason || !return_type) {
+            return res.status(400).json({ success: false, message: "Missing required fields for return request." });
+        }
+
+        await client.query('BEGIN');
+
+        // 1. Verify the order belongs to the customer and is delivered
+        const orderCheck = await client.query(
+            "SELECT order_status FROM orders WHERE order_id = $1 AND customer_id = $2",
+            [order_id, customer_id]
+        );
+
+        if (orderCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: "Order not found or does not belong to you." });
+        }
+
+        if (orderCheck.rows[0].order_status !== 'Delivered') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, message: "Only delivered orders can be returned." });
+        }
+
+        // 2. Verify the order item exists
+        const itemCheck = await client.query(
+            "SELECT unit_price, quantity FROM order_items WHERE order_item_id = $1 AND order_id = $2",
+            [order_item_id, order_id]
+        );
+
+        if (itemCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: "Order item not found." });
+        }
+
+        const { unit_price, quantity } = itemCheck.rows[0];
+        const refund_amount = unit_price * quantity;
+
+        // 3. Insert into return_requests
+        const returnRes = await client.query(
+            `INSERT INTO return_requests (
+                return_request_id, order_id, order_item_id, customer_id, 
+                reason, return_type, refund_amount, refund_status, requested_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'Pending', NOW())
+            RETURNING return_request_id`,
+            [order_id, order_item_id, customer_id, reason, return_type, refund_amount]
+        );
+        const return_request_id = returnRes.rows[0].return_request_id;
+
+        // 4. Create notification for admin
+        await client.query(
+            `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
+             VALUES (gen_random_uuid(), 'return_request', $1, NOW(), false)`,
+            [`New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
+        );
+
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, message: "Return request submitted successfully.", return_id: return_request_id });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("CREATE RETURN REQUEST ERROR:", error);
+        res.status(500).json({ success: false, message: "Failed to submit return request.", error: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+
+

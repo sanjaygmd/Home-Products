@@ -16,7 +16,7 @@ import {
   verifyOTP
 } from '../controllers/AuthController/customerController.js';
 import { registerSeller, sellerOnboarding, loginSeller, logoutSeller, getSellerStats, getSellerDashboardData, getSellerOrders, getSellerCustomers, getSellerProfile, updateSellerProfile, getSellerPayments, getSellerFinanceAnalytics, getSellerNotifications, markNotificationRead } from '../controllers/AuthController/sellerController.js';
-import { registerAdmin, loginAdmin, logoutAdmin, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, getAllPayments, getAllReturns, changeAdminPassword, getAuditLogs } from '../controllers/AuthController/adminController.js';
+import { registerAdmin, loginAdmin, logoutAdmin, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, getAllPayments, getAllReturns, resolveReturnRequest, changeAdminPassword, getAuditLogs } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
 import { verifyToken } from '../middlewares/authMiddleware.js';
@@ -70,6 +70,7 @@ authRoutes.get('/admin/customers', verifyToken, getAllCustomers);
 authRoutes.get('/admin/products', verifyToken, getAdminProducts);
 authRoutes.get('/admin/payments', verifyToken, getAllPayments);
 authRoutes.get('/admin/returns', verifyToken, getAllReturns);
+authRoutes.post('/admin/returns/:id/resolve', verifyToken, resolveReturnRequest);
 authRoutes.patch('/admin/customer/:id/status', verifyToken, toggleCustomerStatus);
 authRoutes.patch('/admin/seller/:id/status', verifyToken, toggleSellerStatus);
 authRoutes.get('/admin/audit-logs', verifyToken, getAuditLogs);
