@@ -8,6 +8,14 @@ const BasicInfo = ({ next, data, setData }) => {
     if (!data.name || !data.email || !data.phone) {
       return setError("All fields required");
     }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.email)) {
+        return setError("Please enter a valid email address");
+    }
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(data.phone)) {
+        return setError("Please enter a valid 10-digit phone number");
+    }
     setError("");
     next();
   };

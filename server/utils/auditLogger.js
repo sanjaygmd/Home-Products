@@ -18,7 +18,11 @@ import { pool } from "../configs/db.js";
 export const logAction = async (req, action, payload = {}) => {
     try {
         const user = req.user;
-        if (!user) return; // Only log authenticated admin actions
+        if (!user) return; // Only log authenticated actions
+
+        const userType = user.type || user.role;
+        const isSuperAdmin = userType === 'super_admin';
+        const userId = user.id || user.admin_id;
 
         const tableMap = {
             'ADD_PRODUCT': 'products',
@@ -38,12 +42,14 @@ export const logAction = async (req, action, payload = {}) => {
         const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
         const userAgent = req.get('User-Agent') || 'Server Process';
 
+
         await pool.query(
             `INSERT INTO audit_logs 
-            (audit_id, admin_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent, created_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            (audit_id, admin_id, super_admin_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent, created_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
             [
-                user.id || user.admin_id || user.seller_id, 
+                isSuperAdmin ? null : userId, 
+                isSuperAdmin ? userId : null,
                 action, 
                 table_name, 
                 record_id, 
@@ -62,17 +68,30 @@ export const logAction = async (req, action, payload = {}) => {
 /**
  * Legacy/Core log function
  */
-export const logAudit = async ({ admin_id, action, table_name, record_id, old_values = null, new_values = null, req = null }) => {
+export const logAudit = async ({ admin_id, action, table_name, record_id, old_values = null, new_values = null, req = null, is_super_admin = false }) => {
     // ... (rest of old logic is similar, but logAction is now preferred)
     try {
         const ip = req?.ip || req?.headers?.['x-forwarded-for'] || req?.connection?.remoteAddress || '0.0.0.0';
         const userAgent = req?.get('User-Agent') || 'Server Process';
 
+        const userType = req?.user?.type || req?.user?.role;
+        const isSuperAdmin = is_super_admin || userType === 'super_admin';
+
         await pool.query(
             `INSERT INTO audit_logs 
-            (audit_id, admin_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent, created_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-            [admin_id, action, table_name, record_id, old_values ? JSON.stringify(old_values) : null, new_values ? JSON.stringify(new_values) : null, ip, userAgent]
+            (audit_id, admin_id, super_admin_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent, created_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+            [
+                isSuperAdmin ? null : admin_id, 
+                isSuperAdmin ? admin_id : null,
+                action, 
+                table_name, 
+                record_id, 
+                old_values ? JSON.stringify(old_values) : null, 
+                new_values ? JSON.stringify(new_values) : null, 
+                ip, 
+                userAgent
+            ]
         );
     } catch (err) { console.error(err); }
 };

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Bell, X, Mail, Phone, LogOut, Menu, Home, LayoutDashboard, Package, ShoppingCart, Users, CreditCard, RotateCcw, FileBarChart, Settings, Store, Ticket, Shield, MessageSquare } from "lucide-react";
 import { useNavigate, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext.jsx";
@@ -14,6 +14,22 @@ export function DashboardHeader() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [loadingNotifs, setLoadingNotifs] = useState(false);
+
+  const notifRef = useRef(null);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (notifRef.current && !notifRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(event.target)) {
+        setShowProfile(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (currentUser?.id) {
@@ -97,13 +113,15 @@ export function DashboardHeader() {
               </button>
 
               {/* Notification Toggle */}
-              <div className="relative">
+              <div className="relative" ref={notifRef}>
                 <button
                   onClick={() => { setShowNotifications(!showNotifications); setShowProfile(false); }}
                   className="p-3 hover:bg-slate-50 rounded-xl transition-all text-slate-500 hover:text-slate-950 relative"
                 >
                   <Bell size={18} />
-                  <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500 border-2 border-white" />
+                  {notifications.some(n => !n.is_read) && (
+                    <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500 border-2 border-white" />
+                  )}
                 </button>
 
                 {showNotifications && (
@@ -141,7 +159,7 @@ export function DashboardHeader() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="font-black text-[13px] text-slate-900 leading-tight">
-                                  {notif.type === 'new_order' ? 'New Order Received' : notif.type === 'order_placed' ? 'Order Confirmed' : 'System Update'}
+                                  {notif.type === 'new_order' ? 'New Order Received' : notif.type === 'order_placed' ? 'Order Confirmed' : notif.type === 'ADMIN_PASSWORD_RESET_REQUEST' ? 'Password Reset Request' : 'System Update'}
                                 </p>
                                 <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed">{notif.message}</p>
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-2">{new Date(notif.created_at).toLocaleString()}</p>
@@ -158,7 +176,7 @@ export function DashboardHeader() {
             </div>
 
             {/* Profile Toggle */}
-            <div className="relative">
+            <div className="relative" ref={profileRef}>
               <button
                 onClick={() => { setShowProfile(!showProfile); setShowNotifications(false); }}
                 className="h-10 w-10 rounded-xl bg-slate-950 flex items-center justify-center text-white text-[11px] font-black hover:scale-105 transition-all shadow-lg"

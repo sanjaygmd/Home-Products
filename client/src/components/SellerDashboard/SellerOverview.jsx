@@ -114,7 +114,7 @@ const SellerOverview = () => {
             </div>
             <div>
               <h2 className="text-2xl md:text-4xl font-black text-white flex items-center gap-3 justify-center md:justify-start tracking-tight">
-                Welcome, {seller?.name.split(' ')[0]}! <VerifiedIcon className="text-blue-200" fontSize="medium" />
+                Welcome, {(seller?.name || seller?.store_name || seller?.full_name || "Seller").split(' ')[0]}! <VerifiedIcon className="text-blue-200" fontSize="medium" />
               </h2>
               <p className="text-blue-100 mt-2 font-semibold text-lg opacity-90">
                 {stats.pending_orders > 0 

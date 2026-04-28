@@ -2,9 +2,10 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Package, ShoppingCart, Users,
   Ticket, Shield, CreditCard, BarChart3, Store,
-  MessageSquare, Landmark
+  MessageSquare, Landmark, ShieldCheck
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
+import { useAuth } from "../../../context/AuthContext";
 
 const navItems = [
   { title: "Dashboard", path: "/admin", icon: LayoutDashboard },
@@ -18,8 +19,17 @@ const navItems = [
   { title: "Logs", path: "/admin/logs", icon: Shield },
 ];
 
+const superAdminItems = [
+  { title: "Admins", path: "/admin/administrators", icon: ShieldCheck },
+];
+
 export function AdminSidebar() {
   const location = useLocation();
+  const { currentUser } = useAuth();
+
+  const menuItems = currentUser?.role === 'super_admin' 
+    ? [...navItems, ...superAdminItems] 
+    : navItems;
 
   return (
     <aside className="hidden lg:flex flex-col bg-white border-r border-slate-100 sticky top-0 h-screen w-72 flex-shrink-0">
@@ -31,14 +41,16 @@ export function AdminSidebar() {
           </div>
           <div>
             <span className="block text-sm font-black text-slate-950 tracking-tight leading-none">Home Products</span>
-            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Admin Panel</span>
+            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+              {currentUser?.role === 'super_admin' ? 'Super Admin' : 'Admin Panel'}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Navigation Links */}
       <div className="flex-1 py-8 px-4 space-y-2">
-        {navItems.map((item) => (
+        {menuItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}

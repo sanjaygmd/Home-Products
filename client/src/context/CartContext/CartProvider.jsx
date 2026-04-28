@@ -96,10 +96,10 @@ export const CartProvider = ({ children }) => {
       const auth = getAuth();
       emailjs
         .send(
-          "service_xi1pa3f",
-          "template_gcm8lqe",
+          import.meta.env.VITE_EMAILJS_SERVICE_ID,
+          import.meta.env.VITE_EMAILJS_CART_TEMPLATE_ID,
           { product_name: product.name, to_email: auth?.email },
-          "y1WJPO0mL8ZixdyyR"
+          import.meta.env.VITE_EMAILJS_PUBLIC_KEY
         )
         .catch(() => {});
     } finally {

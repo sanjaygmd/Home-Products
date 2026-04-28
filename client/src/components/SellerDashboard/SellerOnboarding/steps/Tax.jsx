@@ -5,8 +5,8 @@ const Tax = ({ next, back, data, setData }) => {
   const [error, setError] = useState("");
 
   const handleNext = () => {
-    if (!data.pan) {
-      return setError("PAN is required");
+    if (!data.pan || data.pan.length !== 10) {
+      return setError("Valid 10-character PAN is required");
     }
     setError("");
     next();

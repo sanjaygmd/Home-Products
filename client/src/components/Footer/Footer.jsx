@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 
 const Footer = () => {
   return (
@@ -21,10 +22,11 @@ const Footer = () => {
           </h3>
 
           <ul className="space-y-3 text-sm">
-            <li className="hover:text-white cursor-pointer transition">Shop</li>
-            <li className="hover:text-white cursor-pointer transition">About Us</li>
-            <li className="hover:text-white cursor-pointer transition">Contact</li>
-            <li className="hover:text-white cursor-pointer transition">Privacy Policy</li>
+            <li><a href="/#shop" className="hover:text-white cursor-pointer transition">Shop</a></li>
+            <li><a href="/#about" className="hover:text-white cursor-pointer transition">About Us</a></li>
+            <li><a href="#contact" className="hover:text-white cursor-pointer transition">Contact</a></li>
+            <li><Link to="/terms" className="hover:text-white cursor-pointer transition">Terms & Conditions</Link></li>
+            <li><Link to="/privacy" className="hover:text-white cursor-pointer transition">Privacy Policy</Link></li>
           </ul>
         </div>
 
@@ -46,16 +48,16 @@ const Footer = () => {
           </h3>
 
           <div className="flex flex-col gap-3 text-sm">
-            <a className="hover:text-white transition cursor-pointer">
+            <a href="https://instagram.com" target="_blank" rel="noreferrer" className="hover:text-white transition cursor-pointer">
               Instagram
             </a>
-            <a className="hover:text-white transition cursor-pointer">
+            <a href="https://facebook.com" target="_blank" rel="noreferrer" className="hover:text-white transition cursor-pointer">
               Facebook
             </a>
-            <a className="hover:text-white transition cursor-pointer">
+            <a href="https://twitter.com" target="_blank" rel="noreferrer" className="hover:text-white transition cursor-pointer">
               Twitter / X
             </a>
-            <a className="hover:text-white transition cursor-pointer">
+            <a href="https://youtube.com" target="_blank" rel="noreferrer" className="hover:text-white transition cursor-pointer">
               YouTube
             </a>
           </div>

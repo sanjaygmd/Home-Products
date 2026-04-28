@@ -151,7 +151,7 @@ export default function SettingsPage() {
 
     setPwLoading(true);
     try {
-      const resp = await api.put(`/user/admin/change-password/${currentUser?.id}`, { currentPassword: passwords.current, newPassword: passwords.next });
+      const resp = await api.put("/user/admin/update-password-self", { currentPassword: passwords.current, newPassword: passwords.next });
       const data = resp.data;
       if (data.success) {
         toast({ title: "Password Updated", description: "Your password has been changed successfully." });
@@ -159,8 +159,8 @@ export default function SettingsPage() {
       } else {
         toast({ variant: "destructive", title: "Failed", description: data.message });
       }
-    } catch {
-      toast({ variant: "destructive", title: "Server Error", description: "Could not reach the server." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err.response?.data?.message || "Could not update password." });
     } finally {
       setPwLoading(false);
     }
@@ -207,22 +207,22 @@ export default function SettingsPage() {
           {/* Password tab */}
           <button
             onClick={() => setActiveTab("password")}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all",
-              activeTab === "password"
-                ? "bg-white shadow-xl shadow-slate-100 border border-slate-100"
-                : "hover:bg-white/60"
-            )}
-          >
-            <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 bg-rose-50 text-rose-600">
-              <Lock size={16} />
-            </div>
-            <div className="flex-1">
-              <p className={cn("text-[13px] font-black tracking-tight", activeTab === "password" ? "text-slate-900" : "text-slate-600")}>Change Password</p>
-              <p className="text-[10px] font-bold text-slate-400 mt-0.5">Update login credentials</p>
-            </div>
-            {activeTab === "password" && <ChevronRight size={14} className="text-indigo-400 shrink-0" />}
-          </button>
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all",
+                activeTab === "password"
+                  ? "bg-white shadow-xl shadow-slate-100 border border-slate-100"
+                  : "hover:bg-white/60"
+              )}
+            >
+              <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 bg-rose-50 text-rose-600">
+                <Lock size={16} />
+              </div>
+              <div className="flex-1">
+                <p className={cn("text-[13px] font-black tracking-tight", activeTab === "password" ? "text-slate-900" : "text-slate-600")}>Change Password</p>
+                <p className="text-[10px] font-bold text-slate-400 mt-0.5">Update login credentials</p>
+              </div>
+              {activeTab === "password" && <ChevronRight size={14} className="text-indigo-400 shrink-0" />}
+            </button>
         </div>
 
         {/* Right panel */}

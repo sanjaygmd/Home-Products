@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  Mail, Phone, MapPin, Edit2, Save, X, Shield,
+  Mail, Phone, MapPin, Edit2, Save, X, Shield, Lock,
   Users, Package, ShoppingCart, TrendingUp, Camera,
   CheckCircle, Clock, Star, BarChart2
 } from "lucide-react";
@@ -15,6 +15,10 @@ export default function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
+
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordData, setPasswordData] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: currentUser?.name || "",
@@ -69,6 +73,35 @@ export default function ProfilePage() {
       toast({ variant: "destructive", title: "Server Error", description: "Could not reach the server." });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePasswordSave = async () => {
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      toast({ variant: "destructive", title: "Error", description: "New passwords do not match." });
+      return;
+    }
+    if (passwordData.newPassword.length < 6) {
+      toast({ variant: "destructive", title: "Error", description: "New password must be at least 6 characters." });
+      return;
+    }
+    setPasswordLoading(true);
+    try {
+      const resp = await api.put("/user/admin/update-password-self", {
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword
+      });
+      if (resp.data.success) {
+        toast({ title: "Success", description: "Password updated successfully." });
+        setIsChangingPassword(false);
+        setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      } else {
+        toast({ variant: "destructive", title: "Update Failed", description: resp.data.message });
+      }
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err.response?.data?.message || "Failed to update password." });
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -252,6 +285,75 @@ export default function ProfilePage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Security & Password */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Security</h3>
+                <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                  Manage your password and security settings
+                </p>
+              </div>
+              {!isChangingPassword ? (
+                <button
+                  onClick={() => setIsChangingPassword(true)}
+                  className="h-11 px-6 rounded-2xl bg-slate-50 text-slate-700 font-black text-[11px] uppercase tracking-widest hover:bg-slate-100 transition-colors flex items-center gap-2"
+                >
+                  <Lock size={14} /> Change Password
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setIsChangingPassword(false); setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' }); }}
+                    disabled={passwordLoading}
+                    className="h-11 px-5 rounded-2xl bg-slate-100 text-slate-600 font-black text-[11px] uppercase tracking-widest hover:bg-slate-200 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <X size={14} /> Cancel
+                  </button>
+                  <button
+                    onClick={handlePasswordSave}
+                    disabled={passwordLoading}
+                    className="h-11 px-6 rounded-2xl bg-slate-950 text-white font-black text-[11px] uppercase tracking-widest hover:bg-slate-800 transition-colors flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-slate-200"
+                  >
+                    <Save size={14} /> {passwordLoading ? "Updating..." : "Update Password"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {isChangingPassword && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-4 border-t border-slate-100">
+                <div className="flex flex-col gap-2 sm:col-span-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><Lock className="h-3 w-3" /> Current Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.currentPassword}
+                    onChange={(e) => setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }))}
+                    className="h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold text-sm text-slate-900 focus:outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><Shield className="h-3 w-3" /> New Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                    className="h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold text-sm text-slate-900 focus:outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><Shield className="h-3 w-3" /> Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.confirmPassword}
+                    onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    className="h-12 px-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold text-sm text-slate-900 focus:outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Activity Summary */}

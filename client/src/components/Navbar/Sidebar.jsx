@@ -9,9 +9,11 @@ import { animation, navMainIcon } from "../../utils/UIStyles";
 import { sidebarOptions } from "../../data/SidebarData";
 import { CartContext } from "../../context/CartContext/CartContext";
 import { WishListContext } from "../../context/WishListContext/WishListContext";
+import { useAuth } from "../../context/AuthContext";
 
 const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
 
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const {cart} = useContext(CartContext);
   const {wishList} = useContext(WishListContext);
@@ -64,7 +66,11 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
       <div className="flex gap-9 text-gray-800">
         <button
           onClick={() => {
-            navigate('/profile')
+            if (currentUser?.role === 'admin' || currentUser?.role === 'super_admin') {
+              navigate('/admin')
+            } else {
+              navigate('/profile')
+            }
             setSidebarOpen(false)
           }}
           className={`hover:bg-blue-900 ${navMainIcon} ${animation}`}

@@ -4,64 +4,73 @@ import { logAudit } from "../../utils/auditLogger.js";
 import { processAutoPayout } from "../PayoutController.js";
 import { pushOrderToShiprocket, createShiprocketReturn } from "../ShipmentController.js";
 import { sendOrderStatusNotifications } from "../../utils/notifications.js";
+import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP } from "../../utils/mailer.js";
+
+const superAdminLoginOtps = new Map();
 
 export const registerAdmin = async (req, res) => {
   try {
-    const { name, email, password, masterKey } = req.body;
+    const { name, email, password, masterKey, type = 'admin' } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
 
-    const adminCount = await pool.query("SELECT COUNT(*) FROM admins");
-    const hasAdmins = parseInt(adminCount.rows[0].count) > 0;
+    const table = type === 'super_admin' ? 'super_admins' : 'admins';
+    const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
 
-    const EXPECTED_MASTER_KEY = process.env.MASTER_SECURITY_KEY;
+    const countRes = await pool.query(`SELECT COUNT(*) FROM ${table}`);
+    const hasUsers = parseInt(countRes.rows[0].count) > 0;
 
-    if (hasAdmins) {
+    const keyRes = await pool.query("SELECT master_key FROM super_admins LIMIT 1");
+    const EXPECTED_MASTER_KEY = keyRes.rows[0]?.master_key || process.env.MASTER_SECURITY_KEY;
+
+    if (hasUsers) {
       if (!masterKey || masterKey !== EXPECTED_MASTER_KEY) {
         return res.status(403).json({
           success: false,
-          message: "Administrative registration is restricted. Please provide a valid Master Security Key."
+          message: `Administrative registration for ${type} is restricted. Please provide a valid Master Security Key.`
         });
       }
     }
 
-    const existing = await pool.query("SELECT admin_id FROM admins WHERE email = $1", [email]);
+    const existing = await pool.query(`SELECT ${idCol} FROM ${table} WHERE email = $1`, [email]);
     if (existing.rows.length > 0) {
-      return res.status(409).json({ success: false, message: "Email already registered as administrator" });
+      return res.status(409).json({ success: false, message: `Email already registered as ${type}` });
     }
 
     const result = await pool.query(
-      `INSERT INTO admins 
-       (admin_id, name, email, password_hash, role, is_active, created_at, updated_at) 
+      `INSERT INTO ${table} 
+       (${idCol}, name, email, password_hash, role, is_active, created_at, updated_at${type === 'super_admin' ? ', master_key' : ''}) 
        VALUES 
-       (gen_random_uuid(), $1, $2, crypt($3, gen_salt('bf')), 'admin', true, NOW(), NOW())
-       RETURNING admin_id, name, email, role`,
-      [name, email, password]
+       (gen_random_uuid(), $1, $2, crypt($3, gen_salt('bf')), $4, true, NOW(), NOW()${type === 'super_admin' ? ', $5' : ''})
+       RETURNING ${idCol} as id, name, email, role`,
+      type === 'super_admin' ? [name, email, password, type, EXPECTED_MASTER_KEY] : [name, email, password, type]
     );
 
-    const admin = result.rows[0];
+    const user = result.rows[0];
 
-    // Ensure shadow customer record exists for shopping features (Cart, Wishlist, etc)
-    await pool.query(
-      `INSERT INTO customers (customer_id, full_name, email, is_active, is_email_verified)
-       VALUES ($1, $2, $3, true, true)`,
-      [admin.admin_id, admin.name, admin.email]
-    );
-
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(admin.admin_id, 'admin', ip, device);
+    const session = await createAuthSession(user.id, type, ip, device);
+
+    await logAudit({
+      admin_id: user.id,
+      action: 'ADMIN_REGISTER',
+      table_name: table,
+      record_id: user.id,
+      req,
+      is_super_admin: type === 'super_admin'
+    });
 
     return res.status(201).json({
       success: true,
-      message: "Administrator account initialized successfully",
+      message: `${type} account initialized successfully`,
       data: {
-        id: admin.admin_id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
         sessionId: session.sessionId,
         token: session.token
       }
@@ -75,61 +84,76 @@ export const registerAdmin = async (req, res) => {
 
 export const loginAdmin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, type = 'admin' } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 
-    const result = await pool.query("SELECT * FROM admins WHERE email = $1", [email]);
+    const table = type === 'super_admin' ? 'super_admins' : 'admins';
+    const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
+
+    const result = await pool.query(`SELECT * FROM ${table} WHERE email = $1`, [email]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Administrator account not found" });
+      return res.status(404).json({ success: false, message: `${type} account not found` });
     }
 
-    const admin = result.rows[0];
+    const user = result.rows[0];
+    const userId = user[idCol];
 
-    if (!admin.is_active) {
-      return res.status(403).json({ success: false, message: "Account is deactivated. Contact system owner." });
+    if (!user.is_active) {
+      return res.status(403).json({ success: false, message: "Account is deactivated. Contact platform owner." });
     }
 
-    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, admin.password_hash]);
+    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash]);
     if (!passwordMatch.rows[0].match) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    await pool.query("UPDATE admins SET last_login_at = NOW() WHERE admin_id = $1", [admin.admin_id]);
-
-    // Ensure shadow customer record exists for shopping features (Cart, Wishlist, etc)
-    const shadowCheck = await pool.query("SELECT customer_id FROM customers WHERE customer_id = $1 OR email = $2", [admin.admin_id, admin.email]);
-    if (shadowCheck.rows.length === 0) {
-      await pool.query(
-        `INSERT INTO customers (customer_id, full_name, email, is_active, is_email_verified)
-         VALUES ($1, $2, $3, true, true)`,
-        [admin.admin_id, admin.name, admin.email]
-      );
+    if (type === 'super_admin') {
+      // 2FA required for Super Admin
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      superAdminLoginOtps.set(user.email, {
+        otp,
+        expires: Date.now() + 5 * 60 * 1000,
+        user: { ...user, userId }
+      });
+      
+      await sendSuperAdminLoginOTP(user.email, user.name, otp);
+      
+      return res.status(200).json({
+        success: true,
+        requires2FA: true,
+        email: user.email,
+        message: "2FA Verification Code sent to email"
+      });
     }
+
+    await pool.query(`UPDATE ${table} SET last_login_at = NOW() WHERE ${idCol} = $1`, [userId]);
 
     const ip = req.ip || req.connection.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(admin.admin_id, 'admin', ip, device);
+    const session = await createAuthSession(userId, type, ip, device);
 
     // Log the successful login
     await logAudit({
-      admin_id: admin.admin_id,
+      admin_id: userId,
       action: 'LOGIN',
-      table_name: 'admins',
-      record_id: admin.admin_id,
-      req
+      table_name: table,
+      record_id: userId,
+      req,
+      is_super_admin: type === 'super_admin'
     });
 
     return res.status(200).json({
       success: true,
-      message: "Admin login successful",
+      message: `${type} login successful`,
       data: {
-        id: admin.admin_id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
+        id: userId,
+        name: user.name,
+        email: user.email,
+        role: user.role,
         sessionId: session.sessionId,
         token: session.token
       }
@@ -137,7 +161,73 @@ export const loginAdmin = async (req, res) => {
 
   } catch (error) {
     console.error("ADMIN LOGIN ERROR:", error);
-    return res.status(500).json({ success: false, message: "Internal server error during admin login" });
+    return res.status(500).json({ success: false, message: "Internal server error during login" });
+  }
+};
+
+/**
+ * Verify Super Admin 2FA Login
+ */
+export const verifySuperAdminLogin = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP are required" });
+    }
+
+    const loginData = superAdminLoginOtps.get(email);
+    
+    if (!loginData) {
+      return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
+    }
+    
+    if (Date.now() > loginData.expires) {
+      superAdminLoginOtps.delete(email);
+      return res.status(400).json({ success: false, message: "Verification code has expired" });
+    }
+    
+    if (loginData.otp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid verification code" });
+    }
+
+    const user = loginData.user;
+    const userId = user.userId;
+    
+    await pool.query(`UPDATE super_admins SET last_login_at = NOW() WHERE super_admin_id = $1`, [userId]);
+
+
+    const ip = req.ip || req.connection.remoteAddress;
+    const device = { agent: req.get('User-Agent') };
+    const session = await createAuthSession(userId, 'super_admin', ip, device);
+
+    await logAudit({
+      admin_id: userId,
+      action: 'LOGIN',
+      table_name: 'super_admins',
+      record_id: userId,
+      req,
+      is_super_admin: true
+    });
+
+    superAdminLoginOtps.delete(email);
+
+    return res.status(200).json({
+      success: true,
+      message: "Super Admin login successful",
+      data: {
+        id: userId,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        sessionId: session.sessionId,
+        token: session.token
+      }
+    });
+
+  } catch (error) {
+    console.error("VERIFY SUPER ADMIN LOGIN ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -152,6 +242,106 @@ export const logoutAdmin = async (req, res) => {
     return res.status(500).json({ success: false, message: "Logout failed" });
   }
 };
+
+/**
+ * Request Password Reset (Admin)
+ * This creates a notification for Super Admins
+ */
+const resetOtps = new Map();
+
+export const requestAdminPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    let accountInfo = null;
+    let table = 'admins';
+    let idCol = 'admin_id';
+
+    const adminCheck = await pool.query("SELECT admin_id, name FROM admins WHERE email = $1", [email]);
+    if (adminCheck.rows.length > 0) {
+      accountInfo = adminCheck.rows[0];
+    } else {
+      const saCheck = await pool.query("SELECT super_admin_id, name FROM super_admins WHERE email = $1", [email]);
+      if (saCheck.rows.length > 0) {
+        accountInfo = saCheck.rows[0];
+        table = 'super_admins';
+        idCol = 'super_admin_id';
+      }
+    }
+
+    if (!accountInfo) {
+      return res.status(404).json({ success: false, message: "This email is not registered as an Administrator or Super Admin." });
+    }
+
+    // Generate a 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store in memory with 15 minute expiration
+    resetOtps.set(email, {
+      otp,
+      expires: Date.now() + 15 * 60 * 1000,
+      table,
+      idCol,
+      id: accountInfo[idCol]
+    });
+
+    // Send email with OTP
+    await sendAdminPasswordResetEmail(email, accountInfo.name, otp);
+
+    res.json({ success: true, message: "A verification code has been sent to your registered email." });
+  } catch (error) {
+    console.error("PWD RESET REQUEST ERROR:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+/**
+ * Verify OTP and Set New Password
+ */
+export const verifyAdminPasswordReset = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ success: false, message: "Email, OTP, and new password are required" });
+    }
+    
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    const resetData = resetOtps.get(email);
+    
+    if (!resetData) {
+      return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
+    }
+    
+    if (Date.now() > resetData.expires) {
+      resetOtps.delete(email);
+      return res.status(400).json({ success: false, message: "Verification code has expired" });
+    }
+    
+    if (resetData.otp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid verification code" });
+    }
+
+    // Update the password
+    await pool.query(
+      `UPDATE ${resetData.table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${resetData.idCol} = $2`,
+      [newPassword, resetData.id]
+    );
+
+    // Clear the OTP
+    resetOtps.delete(email);
+
+    res.json({ success: true, message: "Password has been successfully reset" });
+  } catch (error) {
+    console.error("VERIFY PWD RESET ERROR:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
 
 /**
  * Get Admin Dashboard Stats and Charts
@@ -1116,35 +1306,142 @@ export const getAdminProducts = async (req, res) => {
 export const changeAdminPassword = async (req, res) => {
   try {
     const { id } = req.params;
-    const { currentPassword, newPassword } = req.body;
+    const { newPassword } = req.body;
 
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: "Current and new password are required" });
+    // Check if requester is Super Admin
+    if (!req.user || req.user.type !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized: Only Super Administrators can change passwords." });
     }
-    if (newPassword.length < 6) {
+
+    if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
     }
 
-    const result = await pool.query("SELECT password_hash FROM admins WHERE admin_id = $1", [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Admin account not found" });
+    // Check if target is an admin or another super admin
+    const adminCheck = await pool.query("SELECT admin_id FROM admins WHERE admin_id = $1", [id]);
+    const saCheck = await pool.query("SELECT super_admin_id FROM super_admins WHERE super_admin_id = $1", [id]);
+
+    const table = adminCheck.rows.length > 0 ? 'admins' : (saCheck.rows.length > 0 ? 'super_admins' : null);
+    const idCol = adminCheck.rows.length > 0 ? 'admin_id' : (saCheck.rows.length > 0 ? 'super_admin_id' : null);
+
+    if (!table) {
+      return res.status(404).json({ success: false, message: "Account not found" });
     }
 
-    const { password_hash } = result.rows[0];
-    const match = await pool.query("SELECT crypt($1, $2) = $2 AS match", [currentPassword, password_hash]);
-    if (!match.rows[0].match) {
-      return res.status(401).json({ success: false, message: "Current password is incorrect" });
-    }
+    // Fetch target details for email
+    const targetInfo = await pool.query(`SELECT name, email FROM ${table} WHERE ${idCol} = $1`, [id]);
+    const { name, email } = targetInfo.rows[0];
 
     await pool.query(
-      "UPDATE admins SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE admin_id = $2",
+      `UPDATE ${table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${idCol} = $2`,
       [newPassword, id]
     );
+
+    // Send automated email via Nodemailer
+    await sendAdminPasswordResetEmail(email, name, newPassword);
+
+    await logAudit({
+      admin_id: req.user.id,
+      action: 'PASSWORD_RESET',
+      table_name: table,
+      record_id: id,
+      req
+    });
 
     return res.status(200).json({ success: true, message: "Password updated successfully" });
   } catch (error) {
     console.error("CHANGE PASSWORD ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to update password" });
+  }
+};
+
+/**
+ * Super Admin: Get All Administrators
+ */
+export const getAllAdministrators = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT admin_id as id, name, email, role, is_active, last_login_at, created_at FROM admins ORDER BY created_at DESC"
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("GET ALL ADMINS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch administrators" });
+  }
+};
+
+/**
+ * Super Admin: Update Administrator Status (Block/Unblock)
+ */
+export const updateAdminStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    await pool.query(
+      "UPDATE admins SET is_active = $1, updated_at = NOW() WHERE admin_id = $2",
+      [is_active, id]
+    );
+
+    await logAudit({
+      admin_id: req.user.id,
+      action: is_active ? 'UNBLOCK_ADMIN' : 'BLOCK_ADMIN',
+      table_name: 'admins',
+      record_id: id,
+      req
+    });
+
+    return res.status(200).json({ success: true, message: `Administrator ${is_active ? 'unblocked' : 'blocked'} successfully` });
+  } catch (error) {
+    console.error("UPDATE ADMIN STATUS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update administrator status" });
+  }
+};
+
+/**
+ * Super Admin: Delete Administrator
+ */
+export const deleteAdministrator = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+
+    await client.query('BEGIN');
+
+    // 1. Delete associated notifications
+    await client.query("DELETE FROM notifications WHERE admin_id = $1", [id]);
+
+    // 2. Nullify references in return_requests
+    await client.query("UPDATE return_requests SET resolved_by_admin_id = NULL WHERE resolved_by_admin_id = $1", [id]);
+
+    // 3. Nullify references in seller_payouts
+    await client.query("UPDATE seller_payouts SET initiated_by_admin_id = NULL WHERE initiated_by_admin_id = $1", [id]);
+
+    // 3.5. Nullify references in audit_logs
+    await client.query("UPDATE audit_logs SET admin_id = NULL WHERE admin_id = $1", [id]);
+
+    // 4. Delete the admin record
+    await client.query("DELETE FROM admins WHERE admin_id = $1", [id]);
+
+    // 5. Delete shadow customer record
+    await client.query("DELETE FROM customers WHERE customer_id = $1", [id]);
+
+    await logAudit({
+      admin_id: req.user.id,
+      action: 'DELETE_ADMIN',
+      table_name: 'admins',
+      record_id: id,
+      req
+    });
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: "Administrator account deleted permanently" });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("DELETE ADMIN ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete administrator account" });
+  } finally {
+    client.release();
   }
 };
 
@@ -1390,5 +1687,95 @@ export const autoDispatchOrders = async (req, res) => {
   } catch (error) {
     console.error("AUTO DISPATCH GLOBAL ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to initiate auto-dispatch" });
+  }
+};
+
+/**
+ * Update Master Security Key
+ */
+export const updateMasterKey = async (req, res) => {
+  try {
+    const { newMasterKey } = req.body;
+
+    if (!req.user || req.user.type !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized: Only Super Administrators can change the Master Key." });
+    }
+
+    if (!newMasterKey || newMasterKey.length < 8) {
+      return res.status(400).json({ success: false, message: "Master Key must be at least 8 characters for security." });
+    }
+
+    await pool.query(
+      "UPDATE super_admins SET master_key = $1, updated_at = NOW()",
+      [newMasterKey]
+    );
+
+    await logAudit({
+      admin_id: req.user.id,
+      action: 'UPDATE_MASTER_KEY',
+      table_name: 'super_admins',
+      record_id: null,
+      new_values: { detail: 'MASTER_SECURITY_KEY_ROTATED' },
+      req
+    });
+
+    res.json({ success: true, message: "Master Security Key updated successfully." });
+  } catch (error) {
+    console.error("UPDATE MASTER KEY ERROR:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+/**
+ * Update Admin Password (Self)
+ */
+export const updateAdminPasswordSelf = async (req, res) => {
+  try {
+    const { id, type } = req.user;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Current password and a new password (min 6 chars) are required." });
+    }
+
+    const table = type === 'super_admin' ? 'super_admins' : 'admins';
+    const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
+
+    const result = await pool.query(`SELECT password_hash, name, email FROM ${table} WHERE ${idCol} = $1`, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Account not found" });
+    }
+
+    const user = result.rows[0];
+    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [currentPassword, user.password_hash]);
+    
+    if (!passwordMatch.rows[0].match) {
+      return res.status(401).json({ success: false, message: "Invalid current password" });
+    }
+
+    await pool.query(
+      `UPDATE ${table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${idCol} = $2`,
+      [newPassword, id]
+    );
+
+    await logAudit({
+      admin_id: id,
+      action: 'UPDATE_OWN_PASSWORD',
+      table_name: table,
+      record_id: id,
+      req
+    });
+    // Send notification to super admins
+    await pool.query(
+      `INSERT INTO notifications (notification_id, type, message, created_at, is_read) 
+       VALUES (gen_random_uuid(), 'ADMIN_PASSWORD_CHANGED', $1, NOW(), false)`,
+      [`Administrator ${user.name || 'Unknown'} (${user.email || 'Unknown'}) has changed their password.`]
+    );
+
+    return res.status(200).json({ success: true, message: "Password updated successfully" });
+  } catch (error) {
+    console.error("UPDATE PASSWORD SELF ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update password" });
   }
 };

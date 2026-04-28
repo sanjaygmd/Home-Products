@@ -7,6 +7,7 @@ import BedRoomProductsPage from './pages/BedRoomProductsPage.jsx';
 import CategoryProductsPage from './pages/CategoryProductsPage.jsx';
 import CartPage from './pages/CartPage.jsx';
 import SearchPage from './pages/SearchPage.jsx';
+import PolicyPage from './pages/PolicyPage.jsx';
 
 import { CartProvider } from './context/CartContext/CartProvider.jsx'
 import WishListPage from './pages/WishListPage.jsx';
@@ -58,6 +59,7 @@ import CouponsPage from './components/admin/pages/CouponsPage.jsx';
 import SystemLogsPage from './components/admin/pages/SystemLogsPage.jsx';
 import ReviewsPage from './components/admin/pages/ReviewsPage.jsx';
 import PrimaryVendorPage from './components/admin/pages/PrimaryVendorPage.jsx';
+import AdministratorsPage from './components/admin/pages/AdministratorsPage.jsx';
 import { AdminSearchProvider } from './components/admin/contexts/AdminSearchContext';
 
 import { AuthProvider } from './context/AuthContext.jsx';
@@ -97,6 +99,8 @@ function MainApp() {
                       </CustomerProtectedRoute>
                     } />
                     <Route path='/search' element={<SearchPage />} />
+                    <Route path='/terms' element={<PolicyPage type="terms" />} />
+                    <Route path='/privacy' element={<PolicyPage type="privacy" />} />
 
                     <Route path='/checkout' element={
                       <CustomerProtectedRoute>
@@ -140,7 +144,7 @@ function MainApp() {
 
 
                     <Route path='/seller' element={
-                      <SellerProtectedRoute>
+                      <SellerProtectedRoute requireVerified={true}>
                         <SellerPortalPage />
                       </SellerProtectedRoute>
                     }>
@@ -183,6 +187,7 @@ function MainApp() {
                       <Route path="logs" element={<SystemLogsPage />} />
                       <Route path="reviews" element={<ReviewsPage />} />
                       <Route path="primary-vendor" element={<PrimaryVendorPage />} />
+                      <Route path="administrators" element={<AdministratorsPage />} />
                     </Route>
                   </Routes>
                 </WishListProvider>

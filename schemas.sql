@@ -123,6 +123,27 @@ CREATE TABLE public.admins (
 ALTER TABLE public.admins OWNER TO postgres;
 
 --
+-- TOC entry 224_2 (class 1259 OID 17823_2)
+-- Name: super_admins; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.super_admins (
+    super_admin_id uuid NOT NULL,
+    name character varying(255),
+    email character varying(255),
+    password_hash text,
+    role character varying(50),
+    permissions jsonb,
+    is_active boolean DEFAULT true,
+    last_login_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.super_admins OWNER TO postgres;
+
+--
 -- TOC entry 253 (class 1259 OID 18742)
 -- Name: annual_finances; Type: TABLE; Schema: public; Owner: postgres
 --

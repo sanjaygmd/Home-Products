@@ -12,6 +12,8 @@ const CustomerRegister = () => {
   const [step, setStep] = useState(1); // 1: Details, 2: OTP
   const [otp, setOtp] = useState("");
   const [verifying, setVerifying] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   const [form, setForm] = useState({
     full_name: "",
@@ -40,6 +42,11 @@ const CustomerRegister = () => {
 
     if (!form.full_name || !form.email || !form.phone || !form.password) {
       setError("All fields are required except profile picture");
+      return;
+    }
+
+    if (!agreed) {
+      setError("You must agree to the Terms & Conditions and Privacy Policy");
       return;
     }
 
@@ -294,6 +301,70 @@ const CustomerRegister = () => {
                   />
                 </div>
               </div>
+
+              <div className="flex items-start gap-3 mt-4">
+                <input
+                  type="checkbox"
+                  id="agree"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                />
+                <label htmlFor="agree" className="text-sm text-gray-600 cursor-pointer select-none">
+                  I agree to the <span onClick={(e) => { e.preventDefault(); setShowTerms(true); }} className="text-blue-600 hover:underline cursor-pointer">Terms & Conditions</span> and <span onClick={(e) => { e.preventDefault(); setShowTerms(true); }} className="text-blue-600 hover:underline cursor-pointer">Privacy Policy</span>
+                </label>
+              </div>
+
+              {/* Terms Modal using Portal */}
+              {showTerms && createPortal(
+                <div 
+                  className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
+                  style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh' }}
+                  onClick={() => setShowTerms(false)}
+                >
+                  <div 
+                    className="relative w-[600px] max-w-[90vw] max-h-[80vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <h2 className="text-xl font-bold text-gray-800">Terms & Privacy Policy</h2>
+                        <button 
+                            type="button"
+                            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors text-gray-500"
+                            onClick={() => setShowTerms(false)}
+                        >
+                            <span className="text-xl leading-none">&times;</span>
+                        </button>
+                    </div>
+                    <div className="p-6 overflow-y-auto text-sm text-gray-600 space-y-4">
+                        <h3 className="font-semibold text-gray-800 text-lg border-b pb-2">Customer Terms and Conditions</h3>
+                        <p>Welcome to Home Products. By registering as a customer, you agree to comply with and be bound by the following terms.</p>
+                        
+                        <h4 className="font-semibold text-gray-800 mt-4">1. Account Security</h4>
+                        <p>You are responsible for maintaining the confidentiality of your account credentials. Any fraudulent activities will result in immediate suspension of your account.</p>
+
+                        <h4 className="font-semibold text-gray-800 mt-4">2. Privacy Policy</h4>
+                        <p>We are committed to protecting your privacy. Any personal information collected during registration will be used exclusively for order processing, personalization, and account management. We do not sell your data to third parties.</p>
+
+                        <h4 className="font-semibold text-gray-800 mt-4">3. Purchases and Payments</h4>
+                        <p>All purchases are subject to availability. By placing an order, you agree to pay the stated price, including any applicable taxes and shipping fees.</p>
+
+                        <h4 className="font-semibold text-gray-800 mt-4">4. Returns and Refunds</h4>
+                        <p>Returns and refunds are governed by our standard Return Policy. Items must be returned in their original condition within the specified timeframe to be eligible.</p>
+                    </div>
+                    <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                        <button 
+                            type="button"
+                            onClick={() => { setShowTerms(false); setAgreed(true); }}
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                        >
+                            I Agree
+                        </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
             </>
           ) : (
             <div className="space-y-6 animate-fadeIn">

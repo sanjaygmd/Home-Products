@@ -1,16 +1,18 @@
 import { pool } from '../configs/db.js';
 import { pushOrderToShiprocket, cancelShipment } from './ShipmentController.js';
 import { processAutoPayout } from './PayoutController.js';
+import crypto from 'crypto';
 
 export const createOrder = async (req, res) => {
   const client = await pool.connect();
   try {
     const {
-      customer_id,
       address_details, // { full_name, phone, address_line_1, city, state, pincode }
       items, // [{ product_id, variant_id, quantity, unit_price, seller_id }]
       payment_method,
-      payment_id, // Razorpay payment ID if online
+      payment_id, // Razorpay payment ID
+      razorpay_order_id,
+      razorpay_signature,
       subtotal,
       shipping_charges,
       tax_amount,
@@ -18,6 +20,30 @@ export const createOrder = async (req, res) => {
       discount_amount = 0,
       coupon_id = null
     } = req.body;
+
+    const customer_id = req.user.id;
+
+    // Security Fix: Razorpay Signature Verification
+    if (payment_method === 'online') {
+      if (!payment_id || !razorpay_order_id || !razorpay_signature) {
+        return res.status(400).json({ success: false, message: "Missing payment verification details" });
+      }
+
+      const secret = process.env.RAZORPAY_KEY_SECRET;
+      if (!secret) {
+        console.error("RAZORPAY_KEY_SECRET NOT SET IN .ENV");
+        return res.status(500).json({ success: false, message: "Payment gateway configuration error" });
+      }
+
+      const generated_signature = crypto
+        .createHmac('sha256', secret)
+        .update(razorpay_order_id + "|" + payment_id)
+        .digest('hex');
+
+      if (generated_signature !== razorpay_signature) {
+        return res.status(400).json({ success: false, message: "Invalid payment signature. Transaction rejected." });
+      }
+    }
 
     // Failsafe: Check if user is an admin
     const adminCheck = await pool.query("SELECT admin_id FROM admins WHERE admin_id = $1", [customer_id]);
@@ -236,7 +262,7 @@ export const createOrder = async (req, res) => {
 
 export const getMyOrders = async (req, res) => {
   try {
-    const { customer_id } = req.params;
+    const customer_id = req.user.id;
     const result = await pool.query(
       `SELECT o.*, 
              (SELECT json_agg(oi.*) FROM order_items oi WHERE oi.order_id = o.order_id) as items
@@ -266,6 +292,29 @@ export const getOrderById = async (req, res) => {
 
     if (orderRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    const order = orderRes.rows[0];
+
+    // Ownership/Role Check
+    // Allowed if: User is the customer WHO placed it, OR an Admin, OR a Seller who has items in this order
+    let isAuthorized = false;
+    if (req.user.type === 'admin') {
+      isAuthorized = true;
+    } else if (req.user.type === 'customer' && order.customer_id === req.user.id) {
+      isAuthorized = true;
+    } else if (req.user.type === 'seller') {
+      const sellerItemCheck = await pool.query(
+        "SELECT 1 FROM order_items WHERE order_id = $1 AND seller_id = $2 LIMIT 1",
+        [order_id, req.user.id]
+      );
+      if (sellerItemCheck.rows.length > 0) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, message: "Unauthorized access to order details" });
     }
 
     // Fetch order items with product details and commission info
@@ -311,13 +360,34 @@ export const updateOrderStatus = async (req, res) => {
   const client = await pool.connect();
   try {
     const { order_id } = req.params;
-    const { status, changed_by, notes, courier, tracking_id, est_delivery } = req.body;
+    const { status, notes, courier, tracking_id, est_delivery } = req.body;
+    const changed_by = req.user.id;
 
-    // Check if order is already cancelled
-    const currentOrder = await client.query("SELECT order_status FROM orders WHERE order_id = $1", [order_id]);
-    if (currentOrder.rows.length > 0 && currentOrder.rows[0].order_status === 'Cancelled') {
+    // Ownership/Role Check
+    if (req.user.type === 'customer' && status !== 'Cancelled') {
+      return res.status(403).json({ success: false, message: "Customers can only cancel their own orders." });
+    }
+
+    const orderCheck = await client.query("SELECT customer_id, order_status FROM orders WHERE order_id = $1", [order_id]);
+    if (orderCheck.rows.length === 0) {
       client.release();
-      return res.status(400).json({ success: false, message: "Cannot update status of a cancelled order." });
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (req.user.type === 'customer' && orderCheck.rows[0].customer_id !== req.user.id) {
+      client.release();
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    if (req.user.type === 'seller') {
+      const sellerItemCheck = await client.query(
+        "SELECT 1 FROM order_items WHERE order_id = $1 AND seller_id = $2 LIMIT 1",
+        [order_id, req.user.id]
+      );
+      if (sellerItemCheck.rows.length === 0) {
+        client.release();
+        return res.status(403).json({ success: false, message: "Unauthorized access to this order" });
+      }
     }
 
     await client.query('BEGIN');
@@ -447,7 +517,8 @@ export const updateOrderStatus = async (req, res) => {
 export const createReturnRequest = async (req, res) => {
     const client = await pool.connect();
     try {
-        const { order_id, order_item_id, customer_id, reason, return_type } = req.body;
+        const { order_id, order_item_id, reason, return_type } = req.body;
+        const customer_id = req.user.id;
 
         if (!order_id || !order_item_id || !customer_id || !reason || !return_type) {
             return res.status(400).json({ success: false, message: "Missing required fields for return request." });

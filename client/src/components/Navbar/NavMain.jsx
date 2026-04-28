@@ -33,7 +33,7 @@ const NavMain = ({ sidebarOpen, setSidebarOpen }) => {
   const { wishList } = useContext(WishListContext);
   const { currentUser, logoutUser } = useAuth();
   const isSeller = currentUser?.role === 'seller';
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -218,7 +218,7 @@ const NavMain = ({ sidebarOpen, setSidebarOpen }) => {
               <>
                 <div className="px-4 py-2 border-b border-gray-100 mb-1">
                   <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-tight">
-                    {isAdmin ? "Admin Authority" : isSeller ? "Seller Account" : "Customer Account"}
+                    {currentUser?.role === 'super_admin' ? "Super Admin Authority" : isAdmin ? "Admin Authority" : isSeller ? "Seller Account" : "Customer Account"}
                   </p>
                   <p className="text-sm font-bold text-gray-900 truncate">
                     {currentUser.name || currentUser.full_name || currentUser.business_name}

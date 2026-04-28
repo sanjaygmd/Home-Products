@@ -16,7 +16,7 @@ import {
   verifyOTP
 } from '../controllers/AuthController/customerController.js';
 import { registerSeller, sellerOnboarding, loginSeller, logoutSeller, getSellerStats, getSellerDashboardData, getSellerOrders, getSellerCustomers, getSellerProfile, updateSellerProfile, getSellerPayments, getSellerFinanceAnalytics, getSellerNotifications, markNotificationRead } from '../controllers/AuthController/sellerController.js';
-import { registerAdmin, loginAdmin, logoutAdmin, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, getAllPayments, getAllReturns, resolveReturnRequest, changeAdminPassword, getAuditLogs } from '../controllers/AuthController/adminController.js';
+import { registerAdmin, loginAdmin, verifySuperAdminLogin, logoutAdmin, requestAdminPasswordReset, verifyAdminPasswordReset, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, getAllPayments, getAllReturns, resolveReturnRequest, changeAdminPassword, updateAdminPasswordSelf, updateMasterKey, getAuditLogs, getAllAdministrators, updateAdminStatus, deleteAdministrator } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
 import { verifyToken } from '../middlewares/authMiddleware.js';
@@ -27,36 +27,39 @@ const authRoutes = express.Router();
 authRoutes.post('/customer/register', registerCustomer);
 authRoutes.post('/customer/login', loginCustomer);
 authRoutes.post('/customer/logout', logoutCustomer);
-authRoutes.post('/customer-onboarding/:id', customerOnboarding);
-authRoutes.put('/customer/update/:id', updateCustomer);
-authRoutes.get('/customer/stats/:id', getCustomerStats);
-authRoutes.get('/customer/orders/:id', getCustomerOrders);
-authRoutes.get('/customer/addresses/:id', getCustomerAddresses);
+authRoutes.post('/customer-onboarding/:id', verifyToken, customerOnboarding);
+authRoutes.put('/customer/update/:id', verifyToken, updateCustomer);
+authRoutes.get('/customer/stats/:id', verifyToken, getCustomerStats);
+authRoutes.get('/customer/orders/:id', verifyToken, getCustomerOrders);
+authRoutes.get('/customer/addresses/:id', verifyToken, getCustomerAddresses);
 authRoutes.post('/customer/send-otp', sendOTP);
 authRoutes.post('/customer/verify-otp', verifyOTP);
-authRoutes.get('/customer/:id', getCustomerById);
+authRoutes.get('/customer/:id', verifyToken, getCustomerById);
 
 // Seller Routes
 authRoutes.post('/seller/register', registerSeller);
 authRoutes.post('/seller/login', loginSeller);
 authRoutes.post('/seller/logout', logoutSeller);
-authRoutes.post('/seller-onboarding/:id', sellerOnboarding);
-authRoutes.get('/seller/stats/:id', getSellerStats);
-authRoutes.get('/seller/dashboard/:id', getSellerDashboardData);
-authRoutes.get('/seller/orders/:id', getSellerOrders);
-authRoutes.get('/seller/customers/:id', getSellerCustomers);
-authRoutes.get('/seller/profile/:id', getSellerProfile);
-authRoutes.put('/seller/profile/:id', updateSellerProfile);
-authRoutes.get('/seller/payments/:id', getSellerPayments);
-authRoutes.get('/seller/finance-analytics/:id', getSellerFinanceAnalytics);
+authRoutes.post('/seller-onboarding/:id', verifyToken, sellerOnboarding);
+authRoutes.get('/seller/stats/:id', verifyToken, getSellerStats);
+authRoutes.get('/seller/dashboard/:id', verifyToken, getSellerDashboardData);
+authRoutes.get('/seller/orders/:id', verifyToken, getSellerOrders);
+authRoutes.get('/seller/customers/:id', verifyToken, getSellerCustomers);
+authRoutes.get('/seller/profile/:id', verifyToken, getSellerProfile);
+authRoutes.put('/seller/profile/:id', verifyToken, updateSellerProfile);
+authRoutes.get('/seller/payments/:id', verifyToken, getSellerPayments);
+authRoutes.get('/seller/finance-analytics/:id', verifyToken, getSellerFinanceAnalytics);
 authRoutes.post('/seller/send-otp', sendOTP);
 authRoutes.post('/seller/verify-otp', verifyOTP);
-authRoutes.get('/seller/notifications/:id', getSellerNotifications);
-authRoutes.patch('/seller/notifications/:notification_id/read', markNotificationRead);
+authRoutes.get('/seller/notifications/:id', verifyToken, getSellerNotifications);
+authRoutes.patch('/seller/notifications/:notification_id/read', verifyToken, markNotificationRead);
 
 // Admin Auth Routes
 authRoutes.post('/admin/register', registerAdmin);
 authRoutes.post('/admin/login', loginAdmin);
+authRoutes.post('/admin/verify-super-admin-login', verifySuperAdminLogin);
+authRoutes.post('/admin/request-password-reset', requestAdminPasswordReset);
+authRoutes.post('/admin/verify-password-reset', verifyAdminPasswordReset);
 authRoutes.post('/admin/logout', logoutAdmin);
 authRoutes.get('/admin/dashboard-data', verifyToken, getAdminDashboardData);
 authRoutes.get('/admin/sellers-data', verifyToken, getSellersData);
@@ -75,6 +78,13 @@ authRoutes.patch('/admin/customer/:id/status', verifyToken, toggleCustomerStatus
 authRoutes.patch('/admin/seller/:id/status', verifyToken, toggleSellerStatus);
 authRoutes.get('/admin/audit-logs', verifyToken, getAuditLogs);
 authRoutes.put('/admin/change-password/:id', verifyToken, changeAdminPassword);
+authRoutes.put('/admin/update-password-self', verifyToken, updateAdminPasswordSelf);
+
+// Super Admin Routes (Admin Management)
+authRoutes.get('/super-admin/administrators', verifyToken, getAllAdministrators);
+authRoutes.patch('/super-admin/administrator/:id/status', verifyToken, updateAdminStatus);
+authRoutes.delete('/super-admin/administrator/:id', verifyToken, deleteAdministrator);
+authRoutes.put('/super-admin/master-key', verifyToken, updateMasterKey);
 
 // Admin Settings & Dynamic Notifications
 authRoutes.get('/admin/settings/:adminId', verifyToken, getAdminSettings);

@@ -16,13 +16,18 @@ const Bank = ({ next, back, data, setData }) => {
       !data.accountNumber ||
       !data.confirmAccount ||
       !data.ifsc ||
-      !data.bankName
+      !data.bankName ||
+      !data.accountType
     ) {
       return setError("All fields are required");
     }
 
     if (data.accountNumber !== data.confirmAccount) {
       return setError("Account numbers do not match");
+    }
+    
+    if (data.ifsc.length !== 11) {
+      return setError("Valid 11-character IFSC code is required");
     }
 
     setError("");

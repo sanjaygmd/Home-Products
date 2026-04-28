@@ -46,7 +46,7 @@ export const loginSeller = async (req, res) => {
     }
 
     const user = existingUser.rows[0];
-    
+
     if (!user.is_active) {
       return res.status(403).json({
         success: false,
@@ -77,6 +77,7 @@ export const loginSeller = async (req, res) => {
         name: user.full_name,
         email: user.email,
         phone: user.phone,
+        is_verified: user.is_verified,
         sessionId: session.sessionId,
         token: session.token
       }
@@ -148,7 +149,7 @@ export const registerSeller = async (req, res) => {
       `INSERT INTO sellers 
   (seller_id, full_name, email, phone, password_hash, store_name, store_logo, store_description) 
   VALUES (gen_random_uuid(), $1, $2, $3, crypt($4, gen_salt('bf')), $5, $6, $7) 
-  RETURNING seller_id, full_name, email, phone, store_name`,
+  RETURNING seller_id, full_name, email, phone, store_name, is_verified`,
       [
         full_name,
         email,
@@ -190,6 +191,11 @@ export const sellerOnboarding = async (req, res) => {
         success: false,
         message: "Seller ID is required",
       });
+    }
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
     const {
@@ -288,6 +294,11 @@ export const getSellerStats = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const statsResult = await pool.query(`
       SELECT 
         (
@@ -373,6 +384,11 @@ export const getSellerDashboardData = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     // 1. Try to fetch from daily_finances
     let dailyFinances = await pool.query(`
       SELECT TO_CHAR(date, 'DD Mon') as name, total_revenue as value
@@ -385,7 +401,7 @@ export const getSellerDashboardData = async (req, res) => {
     // 2. If empty, fill it from existing orders
     if (dailyFinances.rows.length === 0) {
       await populateFinancesFromOrders(sellerId);
-      
+
       // Re-fetch
       dailyFinances = await pool.query(`
         SELECT TO_CHAR(date, 'DD Mon') as name, total_revenue as value
@@ -426,6 +442,11 @@ export const getSellerOrders = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const orders = await pool.query(`
       SELECT o.order_id as id, c.full_name as customer, os.seller_subtotal as total, o.order_status as status, o.placed_at
       FROM orders o
@@ -445,6 +466,11 @@ export const getSellerCustomers = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const customers = await pool.query(`
       SELECT c.customer_id as id, c.full_name as name, c.email, COUNT(o.order_id) as orders, 'Active' as status
       FROM customers c
@@ -463,6 +489,11 @@ export const getSellerCustomers = async (req, res) => {
 export const getSellerProfile = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const seller = await pool.query(`
       SELECT s.full_name as name, s.email, s.store_name, s.phone, a.address_line_1 as address
@@ -484,6 +515,11 @@ export const getSellerProfile = async (req, res) => {
 export const updateSellerProfile = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
     const { name, email, storeName, phone, address } = req.body;
 
     await pool.query(`
@@ -509,6 +545,11 @@ export const updateSellerProfile = async (req, res) => {
 export const getSellerPayments = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const earnings = await pool.query(`
       SELECT 
@@ -548,6 +589,11 @@ export const getSellerPayments = async (req, res) => {
 export const getSellerFinanceAnalytics = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const ensureDaily = async () => {
       // Always ensure daily finances are synced for the last 30 days to account for recent cancellations
@@ -769,7 +815,7 @@ async function ensureAllFinances(sellerId) {
     `, [sellerId]);
 
     // 6. Maintenance: Link Foreign Keys for Drill-down Reporting
-    
+
     // Link Monthly to Quarterly
     await pool.query(`
       UPDATE month_finances m
@@ -909,7 +955,7 @@ async function ensureAllFinances(sellerId) {
       WHERE a.seller_id = lh.seller_id AND a.year = lh.year
       AND a.seller_id = $1
     `, [sellerId]);
-    
+
   } catch (error) {
     console.error("Aggregation Error:", error.message);
   }
@@ -918,6 +964,11 @@ async function ensureAllFinances(sellerId) {
 export const getSellerNotifications = async (req, res) => {
   try {
     const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const notifications = await pool.query(`
       SELECT * FROM notifications 
@@ -935,6 +986,15 @@ export const getSellerNotifications = async (req, res) => {
 export const markNotificationRead = async (req, res) => {
   try {
     const { notification_id } = req.params;
+
+    // Ownership Check
+    const notifCheck = await pool.query("SELECT seller_id FROM notifications WHERE notification_id = $1", [notification_id]);
+    if (notifCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    if (notifCheck.rows[0].seller_id !== req.user.id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     await pool.query(`
       UPDATE notifications SET is_read = true WHERE notification_id = $1

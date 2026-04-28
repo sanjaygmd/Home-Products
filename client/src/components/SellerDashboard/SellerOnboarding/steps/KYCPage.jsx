@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { inputStyle, primaryBtn, secondaryBtn, cardStyle } from "../../../../utils/UIStyles";
 import { api } from "../../../../services/api";
+import { useAuth } from "../../../../context/AuthContext";
 
 const KYCPage = ({ back, data, setData }) => {
 
     const navigate = useNavigate();
+    const { loginSeller } = useAuth();
     const [error, setError] = useState('');
 
     const handleFileChange = (e) => {
@@ -13,8 +15,8 @@ const KYCPage = ({ back, data, setData }) => {
 };
 
   const handleSubmit = async () => {
-  if (!data.aadhar) {
-    return setError("Aadhar number is required");
+  if (!data.aadhar || data.aadhar.length !== 12 || isNaN(data.aadhar)) {
+    return setError("Valid 12-digit Aadhar number is required");
   }
 
   try {
@@ -22,10 +24,14 @@ const KYCPage = ({ back, data, setData }) => {
 
     await api.post(`/user/seller-onboarding/${seller.seller_id}`, data);
 
+    seller.is_verified = true;
+    loginSeller(seller);
+    
     navigate("/seller");
 
   } catch (err) {
     console.log(err.response?.data?.message);
+    setError(err.response?.data?.message || "Failed to submit KYC data");
   }
 };
 

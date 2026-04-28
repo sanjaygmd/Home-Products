@@ -5,8 +5,11 @@ const Business = ({ next, back, data, setData }) => {
   const [error, setError] = useState("");
 
   const handleNext = () => {
-    if (!data.businessName || !data.address_line1 || !data.city) {
-      return setError("Fill required fields");
+    if (!data.businessName || !data.address_line1 || !data.city || !data.state || !data.pincode || !data.country) {
+      return setError("Fill all required business and address fields");
+    }
+    if (data.pincode.length < 5 || isNaN(data.pincode)) {
+        return setError("Please enter a valid numeric pincode");
     }
     setError("");
     next();

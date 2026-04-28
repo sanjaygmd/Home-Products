@@ -7,7 +7,7 @@ export const loginCustomer = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if(!email || !password) {
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
         message: 'Some fields are missing'
@@ -24,7 +24,7 @@ export const loginCustomer = async (req, res) => {
     }
 
     const existingUser = await pool.query("SELECT * FROM customers WHERE email = $1", [email])
-    if(existingUser.rows.length === 0) {
+    if (existingUser.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found, try to register'
@@ -32,7 +32,7 @@ export const loginCustomer = async (req, res) => {
     }
 
     const user = existingUser.rows[0];
-    
+
     if (!user.is_active) {
       return res.status(403).json({
         success: false,
@@ -42,7 +42,7 @@ export const loginCustomer = async (req, res) => {
     }
 
     const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash])
-    if(!passwordMatch.rows[0].match) {
+    if (!passwordMatch.rows[0].match) {
       return res.status(401).json({
         success: false,
         message: 'Invalid password'
@@ -175,6 +175,11 @@ export const customerOnboarding = async (req, res) => {
       });
     }
 
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const user = await pool.query(
       "SELECT full_name, phone FROM customers WHERE customer_id = $1",
       [id]
@@ -224,36 +229,49 @@ export const customerOnboarding = async (req, res) => {
 
 
 export const getCustomerById = async (req, res) => {
-    try {
-        const {id} = req.params;
+  try {
+    const { id } = req.params;
 
-        const user = await pool.query("SELECT * FROM customers WHERE customer_id = $1", [id]);
-
-        if(user.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            })
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Getting customer id is successful',
-            data: user.rows[0]
-        })
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to get customer by id',
-            error: error.message
-        })
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
+
+    const user = await pool.query(
+      "SELECT customer_id, full_name, email, phone, date_of_birth, gender, profile_picture_url, is_active, created_at FROM customers WHERE customer_id = $1",
+      [id]
+    );
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Getting customer id is successful',
+      data: user.rows[0]
+    })
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get customer by id',
+      error: error.message
+    })
+  }
 }
 
 export const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     const { full_name, phone, date_of_birth, gender, profile_picture_url } = req.body;
+
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     if (!full_name || !phone) {
       return res.status(400).json({
@@ -296,6 +314,11 @@ export const getCustomerStats = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const ordersCount = await pool.query("SELECT COUNT(*) FROM orders WHERE customer_id = $1", [id]);
     const cartCount = await pool.query("SELECT item_count FROM cart WHERE customer_id = $1", [id]);
     const wishlistCount = await pool.query("SELECT item_count FROM wishlist WHERE customer_id = $1", [id]);
@@ -318,6 +341,11 @@ export const getCustomerOrders = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     const result = await pool.query(
       `SELECT * FROM orders WHERE customer_id = $1 ORDER BY placed_at DESC`,
       [id]
@@ -336,6 +364,11 @@ export const getCustomerOrders = async (req, res) => {
 export const getCustomerAddresses = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== id && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const result = await pool.query(
       `SELECT * FROM addresses WHERE customer_id = $1 ORDER BY is_default DESC, created_at DESC`,
@@ -381,9 +414,9 @@ export const sendOTP = async (req, res) => {
     // Check existence based on purpose
     const table = type === 'seller' ? 'sellers' : 'customers';
     const idColumn = type === 'seller' ? 'seller_id' : 'customer_id';
-    
+
     const existingUser = await pool.query(`SELECT ${idColumn} FROM ${table} WHERE email = $1`, [email]);
-    
+
     if (purpose === 'registration' && existingUser.rows.length > 0) {
       return res.status(409).json({ success: false, message: "Email already registered" });
     }
