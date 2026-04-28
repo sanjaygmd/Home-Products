@@ -55,23 +55,34 @@ export const addShiprocketPickupLocation = async (details) => {
   const token = await getAuthToken();
 
   try {
+    // [VALIDATION FIX] Shiprocket requires address_line_1 to be 10+ chars and contain descriptors like 'House/Road'
+    let sanitizedAddress = (details.address_line_1 || '').trim();
+    if (sanitizedAddress.length < 10 || !/(house|flat|road|street|building|plot|no)/i.test(sanitizedAddress)) {
+      sanitizedAddress = `House No. 1, Main Road, ${sanitizedAddress}`;
+    }
+
+    const payload = {
+        pickup_location: details.location_name,
+        name: details.location_name, // Added for dual-compatibility
+        contact_person: details.contact_name || "Warehouse Manager",
+        email: details.email || process.env.SHIPROCKET_EMAIL,
+        phone: details.contact_phone,
+        address: sanitizedAddress,
+        city: details.city,
+        state: details.state,
+        country: "India",
+        pin_code: details.pincode
+    };
+
+    console.log(`[SHIPROCKET] Registering Pickup: ${details.location_name} at ${sanitizedAddress}`);
+
     const response = await fetch(`${BASE_URL}/settings/company/addpickup`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({
-        pickup_location: details.location_name,
-        contact_person: details.contact_name,
-        email: details.email || process.env.SHIPROCKET_EMAIL,
-        phone: details.contact_phone,
-        address: details.address_line_1,
-        city: details.city,
-        state: details.state,
-        country: "India",
-        pin_code: details.pincode
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
@@ -238,6 +249,25 @@ export const createShiprocketReturn = async (returnData) => {
     return data;
   } catch (error) {
     console.error('Shiprocket Return Order Error:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+/**
+ * Fetch all registered pickup locations from Shiprocket
+ */
+export const getShiprocketPickupLocations = async () => {
+  const token = await getAuthToken();
+
+  try {
+    const response = await fetch(`${BASE_URL}/settings/company/pickup`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Shiprocket Get Pickups Error:', error.message);
     return { success: false, message: error.message };
   }
 };

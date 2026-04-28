@@ -17,9 +17,11 @@ export const getAllReviews = async (req, res) => {
         const result = await pool.query(query);
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching reviews", error: error.message });
+        console.error('GET ALL REVIEWS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching reviews" });
     }
 };
+
 
 // Delete a review (Admin)
 export const deleteReview = async (req, res) => {
@@ -28,9 +30,11 @@ export const deleteReview = async (req, res) => {
         await pool.query("DELETE FROM reviews WHERE review_id = $1", [id]);
         res.status(200).json({ success: true, message: "Review deleted successfully" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error deleting review", error: error.message });
+        console.error('DELETE REVIEW ERROR:', error);
+        res.status(500).json({ success: false, message: "Error deleting review" });
     }
 };
+
 
 // Get reviews for a specific product (Public/Seller)
 export const getProductReviews = async (req, res) => {
@@ -61,11 +65,22 @@ export const getProductReviews = async (req, res) => {
         query += ` ORDER BY r.created_at DESC`;
         
         const result = await pool.query(query, params);
-        res.status(200).json({ success: true, data: result.rows });
+        
+        const sanitizedRows = result.rows.map(row => {
+            const names = row.customer_name ? row.customer_name.split(' ') : ['Guest'];
+            return {
+                ...row,
+                customer_name: names[0] + (names.length > 1 ? ' ' + names[1].charAt(0) + '.' : '')
+            };
+        });
+
+        res.status(200).json({ success: true, data: sanitizedRows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching product reviews", error: error.message });
+        console.error('GET PRODUCT REVIEWS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching product reviews" });
     }
 };
+
 // Add a new review (Customer)
 export const addReview = async (req, res) => {
     const { product_id, order_item_id, rating, title, body, variant_id } = req.body;
@@ -91,9 +106,11 @@ export const addReview = async (req, res) => {
         
         res.status(201).json({ success: true, message: "Review submitted successfully", data: result.rows[0] });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error submitting review", error: error.message });
+        console.error('ADD REVIEW ERROR:', error);
+        res.status(500).json({ success: false, message: "Error submitting review" });
     }
 };
+
 
 // Check if customer can review a product
 export const checkCanReview = async (req, res) => {
@@ -133,8 +150,8 @@ export const checkCanReview = async (req, res) => {
             res.status(200).json({ success: true, canReview: false });
         }
     } catch (error) {
-
-        res.status(500).json({ success: false, message: "Error checking review eligibility", error: error.message });
+        console.error('CHECK CAN REVIEW ERROR:', error);
+        res.status(500).json({ success: false, message: "Error checking review eligibility" });
     }
 };
 
@@ -160,9 +177,11 @@ export const updateReview = async (req, res) => {
         const result = await pool.query(query, [rating, title, body, id]);
         res.status(200).json({ success: true, message: "Review updated successfully", data: result.rows[0] });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error updating review", error: error.message });
+        console.error('UPDATE REVIEW ERROR:', error);
+        res.status(500).json({ success: false, message: "Error updating review" });
     }
 };
+
 
 
 

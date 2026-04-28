@@ -9,9 +9,11 @@ export const getActiveCoupons = async (req, res) => {
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to fetch coupons", error: error.message });
+        console.error('FETCH COUPONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Failed to fetch coupons" });
     }
 };
+
 
 // Validate and get coupon by code
 export const validateCoupon = async (req, res) => {
@@ -45,9 +47,20 @@ export const validateCoupon = async (req, res) => {
             }
         }
 
-        // Check usage limit
+        // Check usage limit (Total)
         if (coupon.max_usage && coupon.used_count >= coupon.max_usage) {
             return res.status(400).json({ success: false, message: "Coupon usage limit reached" });
+        }
+
+        // Check if customer already used this coupon (Individual)
+        if (req.user && req.user.id) {
+            const usageCheck = await pool.query(
+                "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
+                [coupon.coupon_id, req.user.id]
+            );
+            if (usageCheck.rows.length > 0) {
+                return res.status(400).json({ success: false, message: "You have already used this coupon" });
+            }
         }
 
         // Check minimum order value
@@ -60,9 +73,11 @@ export const validateCoupon = async (req, res) => {
 
         res.status(200).json({ success: true, data: coupon });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error validating coupon", error: error.message });
+        console.error('VALIDATE COUPON ERROR:', error);
+        res.status(500).json({ success: false, message: "Error validating coupon" });
     }
 };
+
 
 // For Admin: Get all coupons (including inactive)
 export const getAllCoupons = async (req, res) => {
@@ -70,9 +85,11 @@ export const getAllCoupons = async (req, res) => {
         const result = await pool.query("SELECT * FROM coupons ORDER BY created_at DESC");
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to fetch all coupons", error: error.message });
+        console.error('FETCH ALL COUPONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Failed to fetch all coupons" });
     }
 };
+
 
 // Create a new coupon
 export const createCoupon = async (req, res) => {
@@ -100,9 +117,11 @@ export const createCoupon = async (req, res) => {
 
         res.status(201).json({ success: true, message: "Coupon created successfully", data: newCoupon });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to create coupon", error: error.message });
+        console.error('CREATE COUPON ERROR:', error);
+        res.status(500).json({ success: false, message: "Failed to create coupon" });
     }
 };
+
 
 // Update a coupon
 export const updateCoupon = async (req, res) => {
@@ -148,9 +167,11 @@ export const updateCoupon = async (req, res) => {
 
         res.status(200).json({ success: true, message: "Coupon updated successfully", data: updatedCoupon });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to update coupon", error: error.message });
+        console.error('UPDATE COUPON ERROR:', error);
+        res.status(500).json({ success: false, message: "Failed to update coupon" });
     }
 };
+
 
 // Delete a coupon
 export const deleteCoupon = async (req, res) => {
@@ -176,6 +197,8 @@ export const deleteCoupon = async (req, res) => {
 
         res.status(200).json({ success: true, message: "Coupon deleted successfully" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Failed to delete coupon", error: error.message });
+        console.error('DELETE COUPON ERROR:', error);
+        res.status(500).json({ success: false, message: "Failed to delete coupon" });
     }
 };
+

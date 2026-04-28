@@ -45,7 +45,9 @@ export default function CustomersPage() {
     setLoading(true);
     try {
       const resp = await api.get('/user/admin/customers');
-      setCustomers(Array.isArray(resp.data) ? resp.data : []);
+      if (resp.data.success) {
+        setCustomers(Array.isArray(resp.data.data) ? resp.data.data : []);
+      }
     } catch (err) {
       console.error('Customer fetch error:', err);
     } finally {

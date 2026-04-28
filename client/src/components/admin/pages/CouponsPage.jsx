@@ -6,6 +6,7 @@ const CouponsPage = () => {
     const [coupons, setCoupons] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [modalError, setModalError] = useState("");
     const [editingCoupon, setEditingCoupon] = useState(null);
     const [formData, setFormData] = useState({
         code: '',
@@ -72,9 +73,10 @@ const CouponsPage = () => {
         
         if (res.success) {
             setIsModalOpen(false);
+            setModalError(""); // Clear error on success
             fetchCoupons();
         } else {
-            alert(res.message);
+            setModalError(res.message);
         }
     };
 
@@ -180,6 +182,14 @@ const CouponsPage = () => {
                         <h2 className="text-xl font-bold mb-6">
                             {editingCoupon ? 'Edit Coupon' : 'Create New Coupon'}
                         </h2>
+                        
+                        {modalError && (
+                            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 animate-shake">
+                                <span className="text-red-500 font-bold">⚠️</span>
+                                <p className="text-xs font-bold text-red-600">{modalError}</p>
+                            </div>
+                        )}
+
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Coupon Code</label>

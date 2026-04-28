@@ -1,91 +1,172 @@
-import { pool } from '../configs/db.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { pool } from '../configs/db.js';
 
-// Identifies user if token is present — does NOT block unauthenticated requests.
-// Safe to use on public routes where auth is optional (e.g. product listings).
-export const identifyUser = async (req, res, next) => {
+const debugLog = (msg, data) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return next();
-        }
-
-        const token = authHeader.split(' ')[1];
-        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-
-        const result = await pool.query(`
-            SELECT s.*, a.name as admin_name, a.email as admin_email,
-                   sel.store_name, sel.email as seller_email
-            FROM auth_sessions s
-            LEFT JOIN admins a ON s.user_ref_id = a.admin_id AND s.user_type = 'admin'
-            LEFT JOIN sellers sel ON s.user_ref_id = sel.seller_id AND s.user_type = 'seller'
-            WHERE s.token_hash = $1 AND s.expires_at > NOW() AND s.is_blacklisted = false
-        `, [tokenHash]);
-
-        if (result.rows.length > 0) {
-            const session = result.rows[0];
-            req.user = {
-                id: session.user_ref_id,
-                type: session.user_type,
-                email: session.admin_email || session.seller_email,
-                name: session.admin_name || session.store_name
-            };
-        }
-
-        next();
-    } catch (error) {
-        console.error("IDENTIFY USER ERROR:", error.message);
-        next();
-    }
+        const logPath = path.join(process.cwd(), 'debug_auth.log');
+        const entry = `[${new Date().toISOString()}] ${msg}: ${JSON.stringify(data, null, 2)}\n`;
+        fs.appendFileSync(logPath, entry);
+    } catch (e) {}
 };
 
-// Blocks unauthenticated requests with a 401.
-// Alias for requireAuth() to maintain backward compatibility but enforce security.
-export const verifyToken = (req, res, next) => requireAuth()(req, res, next);
-
-// Blocks unauthenticated requests with a 401.
-// Optionally enforces role-based access with a 403.
-// Usage:  requireAuth()                 — any logged-in user
-//         requireAuth(['admin'])        — admins only
-//         requireAuth(['seller','admin'])— sellers or admins
+/**
+ * Middleware to verify session token and check roles
+ * Supports multiple concurrent sessions (admin, seller, customer) via role-specific cookies
+ */
 export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
     try {
+        const tokens = [];
         const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        
+        // 1. Collect all potential tokens from headers and cookies
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            tokens.push(authHeader.split(' ')[1]);
+        }
+        
+        if (req.cookies) {
+            // Prioritize by role if possible
+            if (allowedRoles.includes('admin') || allowedRoles.includes('super_admin')) {
+                if (req.cookies.admin_token) tokens.push(req.cookies.admin_token);
+            }
+            if (allowedRoles.includes('seller')) {
+                if (req.cookies.seller_token) tokens.push(req.cookies.seller_token);
+            }
+            if (allowedRoles.includes('customer')) {
+                if (req.cookies.customer_token) tokens.push(req.cookies.customer_token);
+            }
+            
+            // Add generic token as fallback
+            if (req.cookies.token) tokens.push(req.cookies.token);
+            
+            // Add others as final fallback
+            if (req.cookies.admin_token && !tokens.includes(req.cookies.admin_token)) tokens.push(req.cookies.admin_token);
+            if (req.cookies.seller_token && !tokens.includes(req.cookies.seller_token)) tokens.push(req.cookies.seller_token);
+            if (req.cookies.customer_token && !tokens.includes(req.cookies.customer_token)) tokens.push(req.cookies.customer_token);
+        }
+
+        // Filter out duplicates and nulls
+        const uniqueTokens = [...new Set(tokens)].filter(Boolean);
+
+        debugLog("Auth attempt", { 
+            hasHeader: !!authHeader, 
+            cookieNames: req.cookies ? Object.keys(req.cookies) : [], 
+            uniqueTokensFound: uniqueTokens.length,
+            allowedRoles 
+        });
+
+        if (uniqueTokens.length === 0) {
+            debugLog("Auth failed: No token found");
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
 
-        const token = authHeader.split(' ')[1];
-        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const tokenHashes = uniqueTokens.map(t => crypto.createHash('sha256').update(t).digest('hex'));
 
+        // 2. Query all tokens at once
         const result = await pool.query(`
-            SELECT s.*, a.name as admin_name, a.email as admin_email,
-                   sel.store_name, sel.email as seller_email
-            FROM auth_sessions s
-            LEFT JOIN admins a ON s.user_ref_id = a.admin_id AND s.user_type = 'admin'
-            LEFT JOIN sellers sel ON s.user_ref_id = sel.seller_id AND s.user_type = 'seller'
-            WHERE s.token_hash = $1 AND s.expires_at > NOW() AND s.is_blacklisted = false
-        `, [tokenHash]);
+            SELECT s.*, 
+                   CASE 
+                     WHEN s.user_type = 'customer' THEN (SELECT full_name FROM customers WHERE customer_id = s.user_ref_id)
+                     WHEN s.user_type = 'seller' THEN (SELECT full_name FROM sellers WHERE seller_id = s.user_ref_id)
+                     WHEN s.user_type IN ('admin', 'super_admin') THEN (SELECT name FROM admins WHERE admin_id = s.user_ref_id UNION SELECT name FROM super_admins WHERE super_admin_id = s.user_ref_id)
+                   END as name,
+                   CASE 
+                     WHEN s.user_type = 'customer' THEN (SELECT email FROM customers WHERE customer_id = s.user_ref_id)
+                     WHEN s.user_type = 'seller' THEN (SELECT email FROM sellers WHERE seller_id = s.user_ref_id)
+                     WHEN s.user_type IN ('admin', 'super_admin') THEN (SELECT email FROM admins WHERE admin_id = s.user_ref_id UNION SELECT email FROM super_admins WHERE super_admin_id = s.user_ref_id)
+                   END as email
+            FROM auth_sessions s 
+            WHERE s.token_hash = ANY($1) 
+            AND s.is_blacklisted = false 
+            AND s.expires_at > NOW()
+        `, [tokenHashes]);
 
         if (result.rows.length === 0) {
+            debugLog("Auth failed: No valid sessions found for tokens");
             return res.status(401).json({ success: false, message: 'Invalid or expired session' });
         }
 
-        const session = result.rows[0];
-        req.user = {
-            id: session.user_ref_id,
-            type: session.user_type,
-            email: session.admin_email || session.seller_email,
-            name: session.admin_name || session.store_name
-        };
-
-        if (allowedRoles.length > 0 && !allowedRoles.includes(req.user.type)) {
-            return res.status(403).json({ success: false, message: 'Insufficient permissions' });
+        // 3. Find the best matching session based on allowedRoles
+        let session = null;
+        if (allowedRoles.length > 0) {
+            session = result.rows.find(r => allowedRoles.includes(r.user_type));
+        }
+        
+        // If no direct role match, pick the first valid one (it might fail role check later but we have a user)
+        if (!session) {
+            session = result.rows[0];
         }
 
+        const user = {
+            id: session.user_ref_id,
+            type: session.user_type,
+            email: session.email,
+            name: session.name
+        };
+
+        debugLog("Auth successful session found", { user });
+
+        // 4. Role Check
+        if (allowedRoles.length > 0 && !allowedRoles.includes(user.type)) {
+            debugLog("Auth failed: Insufficient permissions", { userType: user.type, allowedRoles });
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Insufficient permissions',
+                debug: { userType: user.type, allowedRoles }
+            });
+        }
+
+        req.user = user;
+        req.sessionId = session.session_id;
         next();
     } catch (error) {
-        console.error("REQUIRE AUTH ERROR:", error.message);
-        return res.status(401).json({ success: false, message: 'Authentication required' });
+        console.error("AUTH MIDDLEWARE ERROR:", error);
+        debugLog("AUTH MIDDLEWARE ERROR", error.message);
+        return res.status(500).json({ success: false, message: 'Authentication error' });
+    }
+};
+
+/**
+ * Legacy wrapper for backward compatibility
+ */
+export const verifyToken = requireAuth([]); 
+
+/**
+ * Optional Auth (sets req.user if token present, but doesn't block)
+ */
+export const optionalAuth = async (req, res, next) => {
+    try {
+        const tokens = [];
+        if (req.headers.authorization?.startsWith('Bearer ')) {
+            tokens.push(req.headers.authorization.split(' ')[1]);
+        }
+        if (req.cookies) {
+            if (req.cookies.token) tokens.push(req.cookies.token);
+            if (req.cookies.admin_token) tokens.push(req.cookies.admin_token);
+            if (req.cookies.seller_token) tokens.push(req.cookies.seller_token);
+            if (req.cookies.customer_token) tokens.push(req.cookies.customer_token);
+        }
+
+        const uniqueTokens = [...new Set(tokens)].filter(Boolean);
+        if (uniqueTokens.length === 0) return next();
+
+        const tokenHashes = uniqueTokens.map(t => crypto.createHash('sha256').update(t).digest('hex'));
+        const result = await pool.query(`
+            SELECT user_ref_id, user_type 
+            FROM auth_sessions 
+            WHERE token_hash = ANY($1) AND is_blacklisted = false AND expires_at > NOW()
+            LIMIT 1
+        `, [tokenHashes]);
+
+        if (result.rows.length > 0) {
+            req.user = {
+                id: result.rows[0].user_ref_id,
+                type: result.rows[0].user_type
+            };
+        }
+        next();
+    } catch (error) {
+        next();
     }
 };

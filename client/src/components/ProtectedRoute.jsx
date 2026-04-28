@@ -52,7 +52,8 @@ export const PublicRoute = ({ children, restrictedTo = null }) => {
             return <Navigate to="/seller" replace />;
         }
         if (currentUser.role === 'customer') {
-            return <Navigate to="/" replace />;
+            // Let the component handle navigation (e.g. to onboarding)
+            return children;
         }
     }
 

@@ -4,6 +4,11 @@ import { addShiprocketPickupLocation } from '../utils/shiprocket.js';
 // Get all pickup locations for a seller
 export const getSellerPickups = async (req, res) => {
     const { sellerId } = req.params;
+
+    if (req.user.type === 'seller' && req.user.id !== sellerId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to pickup locations' });
+    }
+
     try {
         const result = await pool.query(
             "SELECT * FROM seller_pickup_location WHERE seller_id = $1 ORDER BY created_at DESC",
@@ -11,9 +16,11 @@ export const getSellerPickups = async (req, res) => {
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching pickup locations", error: error.message });
+        console.error('GET SELLER PICKUPS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching pickup locations" });
     }
 };
+
 
 // Add a new pickup location
 export const addPickupLocation = async (req, res) => {
@@ -21,6 +28,11 @@ export const addPickupLocation = async (req, res) => {
         seller_id, location_name, contact_name, contact_phone, 
         address_line_1, city, state, pincode, is_default 
     } = req.body;
+
+    if (req.user.type === 'seller' && req.user.id !== seller_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only add pickup locations for your own account' });
+    }
+
 
     const client = await pool.connect();
     try {
@@ -45,32 +57,34 @@ export const addPickupLocation = async (req, res) => {
 
         const newLocation = localResult.rows[0];
 
-        /*
         // 2. Sync with Shiprocket
         try {
             const srResponse = await addShiprocketPickupLocation(newLocation);
-            if (srResponse && srResponse.success) {
-                // Update local record with Shiprocket's location ID
-                await client.query(
-                    "UPDATE seller_pickup_location SET shipment_location_id = $1 WHERE pickup_id = $2",
-                    [srResponse.address_id.toString(), newLocation.pickup_id]
-                );
-                console.log(`Shiprocket pickup location registered: ${srResponse.address_id}`);
+            // Shiprocket returns status_code 200 for success in some versions, or a success boolean
+            if (srResponse && (srResponse.success || srResponse.status_code === 200)) {
+                const addressId = srResponse.address_id || (srResponse.data && srResponse.data.address_id);
+                if (addressId) {
+                    await client.query(
+                        "UPDATE seller_pickup_location SET shipment_location_id = $1 WHERE pickup_id = $2",
+                        [addressId.toString(), newLocation.pickup_id]
+                    );
+                    console.log(`[SHIPROCKET] Pickup location registered: ${addressId}`);
+                }
             } else {
-                console.warn('Shiprocket Pickup Sync Warning:', srResponse.message || 'Unknown error');
-                // We don't rollback here because local save is successful, but we should inform the user
+                console.warn('[SHIPROCKET] Pickup Sync Warning:', srResponse.message || 'Unknown error');
             }
         } catch (srError) {
-            console.error('Shiprocket Sync Exception:', srError.message);
+            console.error('[SHIPROCKET] Sync Exception:', srError.message);
         }
-        */
 
         await client.query('COMMIT');
         res.status(201).json({ success: true, message: "Pickup location added", data: newLocation });
     } catch (error) {
         await client.query('ROLLBACK');
-        res.status(500).json({ success: false, message: "Error adding pickup location", error: error.message });
+        console.error('ADD PICKUP LOCATION ERROR:', error);
+        res.status(500).json({ success: false, message: "Error adding pickup location" });
     } finally {
+
         client.release();
     }
 };
@@ -90,9 +104,14 @@ export const updatePickupLocation = async (req, res) => {
         // Get seller_id first
         const sellerRes = await client.query("SELECT seller_id FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);
         if (sellerRes.rows.length === 0) {
-            throw new Error("Pickup location not found");
+            return res.status(404).json({ success: false, message: "Pickup location not found" });
         }
         const seller_id = sellerRes.rows[0].seller_id;
+
+        if (req.user.type === 'seller' && req.user.id !== seller_id) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this pickup location' });
+        }
+
 
         // If this is set as default, unset previous default
         if (is_default) {
@@ -117,12 +136,24 @@ export const updatePickupLocation = async (req, res) => {
             RETURNING *
         `, [location_name, contact_name, contact_phone, address_line_1, city, state, pincode, is_default, is_active, pickupId]);
 
+        const updatedLocation = result.rows[0];
+
+        // Sync with Shiprocket
+        try {
+            await addShiprocketPickupLocation(updatedLocation);
+            console.log(`[SHIPROCKET] Pickup location updated/re-registered: ${updatedLocation.location_name}`);
+        } catch (srError) {
+            console.error('[SHIPROCKET] Update Sync Exception:', srError.message);
+        }
+
         await client.query('COMMIT');
         res.status(200).json({ success: true, message: "Pickup location updated", data: result.rows[0] });
     } catch (error) {
         await client.query('ROLLBACK');
-        res.status(500).json({ success: false, message: "Error updating pickup location", error: error.message });
+        console.error('UPDATE PICKUP LOCATION ERROR:', error);
+        res.status(500).json({ success: false, message: "Error updating pickup location" });
     } finally {
+
         client.release();
     }
 };
@@ -131,9 +162,20 @@ export const updatePickupLocation = async (req, res) => {
 export const deletePickupLocation = async (req, res) => {
     const { pickupId } = req.params;
     try {
-        await pool.query("DELETE FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);
+        // Ownership Check
+        const sellerRes = await pool.query("SELECT seller_id FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);
+        if (sellerRes.rows.length > 0) {
+            const seller_id = sellerRes.rows[0].seller_id;
+            if (req.user.type === 'seller' && req.user.id !== seller_id) {
+                return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this pickup location' });
+            }
+            await pool.query("DELETE FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);
+        }
+
         res.status(200).json({ success: true, message: "Pickup location deleted" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error deleting pickup location", error: error.message });
+        console.error('DELETE PICKUP LOCATION ERROR:', error);
+        res.status(500).json({ success: false, message: "Error deleting pickup location" });
     }
 };
+

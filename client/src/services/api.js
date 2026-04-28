@@ -5,20 +5,31 @@ export const api = axios.create({
     withCredentials: true
 });
 
-// Add Interceptor to attach tokens
+// Add a request interceptor to attach the correct token as a fallback
 api.interceptors.request.use((config) => {
-    try {
-        const auth = JSON.parse(localStorage.getItem("auth"));
-        const seller = JSON.parse(localStorage.getItem("seller"));
-        const directToken = localStorage.getItem("token");
+    // 1. Try to find the most specific token based on the request URL
+    let token = null;
+    const url = config.url || '';
 
-        const token = auth?.token || seller?.token || directToken;
+    if (url.includes('/admin/')) {
+        token = localStorage.getItem('token'); 
+    } else if (url.includes('/seller')) { // Match /seller/ and /seller-onboarding
+        const seller = JSON.parse(localStorage.getItem('seller'));
+        token = seller?.token;
+    } else if (url.includes('/customer')) { // Match /customer/ and /customer-onboarding
+        const auth = JSON.parse(localStorage.getItem('auth'));
+        token = auth?.token;
+    } else {
+        // Fallback for general routes
+        const auth = JSON.parse(localStorage.getItem('auth'));
+        const seller = JSON.parse(localStorage.getItem('seller'));
+        token = auth?.token || seller?.token || localStorage.getItem('token');
+    }
 
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-    } catch (err) {
-        console.error("API Interceptor Error:", err);
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
+}, (error) => {
+    return Promise.reject(error);
 });

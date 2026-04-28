@@ -1,72 +1,53 @@
-import { pool } from '../configs/db.js';
 import crypto from 'crypto';
+import { pool } from '../configs/db.js';
 
-/**
- * Creates a new authentication session in the database
- * @param {string} userId - UUID of the customer or seller
- * @param {string} userType - 'customer' or 'seller'
- * @param {string} ip - IP address of the user
- * @param {object} device - Device information (parsed from user-agent)
- * @returns {object} - { sessionId, token }
- */
-export const createAuthSession = async (userId, userType, ip, device = {}) => {
-  try {
-    // 1. Generate a random session token
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    
-    // 2. Hash the token for secure storage
-    const tokenHash = crypto.createHash('sha256').update(sessionToken).digest('hex');
-    
-    // 3. Set expiration (default 30 days)
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
+export const createAuthSession = async (userId, userType, ip, device) => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
-    // 4. Insert into auth_sessions table
-    const query = `
-      INSERT INTO auth_sessions (
-        session_id, user_ref_id, user_type, token_hash, 
-        ip_address, device_info, expires_at
-      ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
-      RETURNING session_id;
-    `;
+  const result = await pool.query(
+    `INSERT INTO auth_sessions (user_ref_id, user_type, token_hash, expires_at, last_ip, last_device)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING session_id`,
+    [userId, userType, tokenHash, expiresAt, ip, JSON.stringify(device)]
+  );
 
-    const values = [
-      userId, 
-      userType, 
-      tokenHash, 
-      ip || '127.0.0.1', 
-      JSON.stringify(device || {}), 
-      expiresAt
-    ];
-    
-    const result = await pool.query(query, values);
-    
-    return {
-      sessionId: result.rows[0].session_id,
-      token: sessionToken
-    };
-  } catch (error) {
-    console.error("CREATE SESSION ERROR:", error.message);
-    throw new Error("Could not create authentication session");
-  }
+  return {
+    token,
+    sessionId: result.rows[0].session_id,
+    expiresAt
+  };
 };
 
-/**
- * Invalidates a specific session (Logout)
- */
 export const invalidateSession = async (sessionId) => {
   await pool.query(
-    "UPDATE auth_sessions SET is_blacklisted = true WHERE session_id = $1",
+    'UPDATE auth_sessions SET is_blacklisted = true WHERE session_id = $1',
     [sessionId]
   );
 };
 
+export const getCookieName = (userType) => {
+  if (userType === 'admin' || userType === 'super_admin') return 'admin_token';
+  if (userType === 'seller') return 'seller_token';
+  if (userType === 'customer') return 'customer_token';
+  return 'token';
+};
+
+export const cookieConfig = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  path: '/',
+  maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+};
+
 /**
- * Invalidates all sessions for a user (Security Reset)
+ * Sets the role-specific session cookie and clears the generic 'token' cookie
  */
-export const invalidateAllUserSessions = async (userId) => {
-  await pool.query(
-    "UPDATE auth_sessions SET is_blacklisted = true WHERE user_ref_id = $1",
-    [userId]
-  );
+export const setSessionCookie = (res, userType, token) => {
+  const name = getCookieName(userType);
+  
+  // Only clear the generic token and the specific one we are setting
+  res.clearCookie('token', { path: '/' });
+  res.cookie(name, token, cookieConfig);
 };

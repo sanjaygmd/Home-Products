@@ -77,12 +77,12 @@ export const addProduct = async (req, res) => {
                         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8) 
                         RETURNING variant_id`,
                         [
-                            product.product_id, 
-                            variantSku, 
-                            variant.name, 
-                            variant.value, 
-                            (variant.price || variant.price === 0) ? variant.price : product.price, 
-                            (variant.stock || variant.stock === 0) ? variant.stock : product.stock_quantity, 
+                            product.product_id,
+                            variantSku,
+                            variant.name,
+                            variant.value,
+                            (variant.price || variant.price === 0) ? variant.price : product.price,
+                            (variant.stock || variant.stock === 0) ? variant.stock : product.stock_quantity,
                             (variant.weight || variant.weight === 0) ? variant.weight : product.weight,
                             product.name // Default variant name to parent name at creation
                         ]
@@ -128,9 +128,9 @@ export const addProduct = async (req, res) => {
         console.error("ADD PRODUCT ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: 'Adding product failed',
-            error: error.message
+            message: 'Internal server error'
         });
+
     }
 };
 
@@ -166,9 +166,9 @@ export const getProducts = async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: 'Error getting all products',
-            error: error.message
+            message: 'Internal server error'
         });
+
     }
 };
 
@@ -180,10 +180,10 @@ export const getCategories = async (req, res) => {
             data: result.rows
         });
     } catch (error) {
+        console.error("PRODUCT API ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: 'Error getting categories',
-            error: error.message
+            message: 'Internal server error'
         });
     }
 };
@@ -216,9 +216,9 @@ export const getProductsById = async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: 'Error getting a product by id',
-            error: error.message
+            message: 'Internal server error'
         });
+
     }
 };
 
@@ -262,13 +262,14 @@ export const addVariants = async (req, res) => {
             client.release();
         }
     } catch (error) {
+        console.error("ADD VARIANTS ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: 'Adding variants failed',
-            error: error.message
+            message: 'Internal server error'
         });
     }
 };
+
 
 export const getProductBySlug = async (req, res) => {
     try {
@@ -292,19 +293,20 @@ export const getProductBySlug = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: 'Getting product by slug successful',
+            message: "Getting product by slug successful",
             data: result.rows[0]
         });
     } catch (error) {
+        console.error("GET PRODUCT BY SLUG ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: 'Error getting a product by slug',
-            error: error.message
+            message: 'Internal server error'
         });
     }
 };
 
 export const updateProduct = async (req, res) => {
+
     const { product_id } = req.params;
     const {
         name, description, price, mrp, stock_quantity,
@@ -315,6 +317,18 @@ export const updateProduct = async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
+        // Ownership Check: Only the owner (seller) or an admin can update
+        const ownershipCheck = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [product_id]);
+        if (ownershipCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Product not found' });
+        }
+
+        if (req.user.type === 'seller' && ownershipCheck.rows[0].seller_id !== req.user.id) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this product' });
+        }
 
         // 1. Update the base product record
         const result = await client.query(
@@ -343,15 +357,13 @@ export const updateProduct = async (req, res) => {
             ]
         );
 
-        if (result.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: 'Product not found' });
-        }
+        const product = result.rows[0];
+
 
         // 2. Sync Variants (Smart Sync)
         if (variants && Array.isArray(variants)) {
             const incomingIds = variants.map(v => v.variant_id || v.id || v.tempId).filter(id => id && !String(id).startsWith('v_'));
-            
+
             // A. Handle existing/updated variants and inserts
             for (const v of variants) {
                 const vid = (v.variant_id || v.id || v.tempId);
@@ -363,12 +375,12 @@ export const updateProduct = async (req, res) => {
                         `INSERT INTO product_variants (variant_id, product_id, sku, variant_name, variant_value, price, stock_quantity, weight, name) 
                          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)`,
                         [
-                            product_id, 
-                            variantSku, 
-                            v.variant_name || v.name || 'Variant', 
-                            v.variant_value || v.value || 'Standard', 
-                            v.price || price, 
-                            v.stock_quantity || v.stock || 0, 
+                            product_id,
+                            variantSku,
+                            v.variant_name || v.name || 'Variant',
+                            v.variant_value || v.value || 'Standard',
+                            v.price || price,
+                            v.stock_quantity || v.stock || 0,
                             v.weight || 0,
                             name || result.rows[0].name // Use new parent name if provided, else existing
                         ]
@@ -433,8 +445,8 @@ export const updateProduct = async (req, res) => {
         });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('Error updating product family:', error.message);
-        return res.status(500).json({ success: false, message: 'Error updating product family', error: error.message });
+        console.error('UPDATE PRODUCT FAMILY ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error updating product family' });
     } finally {
         client.release();
     }
@@ -444,11 +456,20 @@ export const deleteProduct = async (req, res) => {
     const { product_id } = req.params;
 
     try {
-        const result = await pool.query('DELETE FROM products WHERE product_id = $1 RETURNING *', [product_id]);
+        // Ownership Check FIRST
+        const prodCheck = await pool.query('SELECT seller_id FROM products WHERE product_id = $1', [product_id]);
 
-        if (result.rows.length === 0) {
+        if (prodCheck.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Product not found' });
         }
+
+        const product = prodCheck.rows[0];
+
+        if (req.user.type === 'seller' && product.seller_id !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this product' });
+        }
+
+        const result = await pool.query('DELETE FROM products WHERE product_id = $1 RETURNING *', [product_id]);
 
         // Log the action
         await logAction(req, 'DELETE_PRODUCT', { product_id, product: result.rows[0] });
@@ -458,7 +479,7 @@ export const deleteProduct = async (req, res) => {
             message: 'Product deleted successfully'
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: 'Error deleting product', error: error.message });
+        return res.status(500).json({ success: false, message: 'Error deleting product' });
     }
 }
 
@@ -466,9 +487,9 @@ export const updateVariant = async (req, res) => {
     const { variant_id } = req.params;
     const body = req.body;
 
-    const { 
+    const {
         variant_name, variant_value, price, stock_quantity, sku, weight,
-        name, description, brand, category_id, room 
+        name, description, brand, category_id, room
     } = body;
 
     const client = await pool.connect();
@@ -488,12 +509,12 @@ export const updateVariant = async (req, res) => {
              WHERE variant_id = $8 RETURNING *`,
             [
                 name, // This is the variant's OWN name now
-                variant_name, 
-                variant_value, 
-                (price === "" || price === undefined) ? null : price, 
-                (stock_quantity === "" || stock_quantity === undefined) ? null : stock_quantity, 
-                sku, 
-                (weight === "" || weight === undefined) ? null : weight, 
+                variant_name,
+                variant_value,
+                (price === "" || price === undefined) ? null : price,
+                (stock_quantity === "" || stock_quantity === undefined) ? null : stock_quantity,
+                sku,
+                (weight === "" || weight === undefined) ? null : weight,
                 variant_id
             ]
         );
@@ -504,6 +525,13 @@ export const updateVariant = async (req, res) => {
         }
 
         const variant = vResult.rows[0];
+
+        // Ownership Check (Need to check product ownership)
+        const prodCheck = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [variant.product_id]);
+        if (req.user.type === 'seller' && prodCheck.rows[0]?.seller_id !== req.user.id) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own the parent product of this variant' });
+        }
 
         // 2. Log the action
         await logAction(req, 'UPDATE_VARIANT', { variant_id, product_id: variant.product_id, updates: req.body });
@@ -526,8 +554,8 @@ export const updateVariant = async (req, res) => {
         });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('BACKEND: ERROR UPDATING VARIANT FAMILY:', error);
-        return res.status(500).json({ success: false, message: 'Error updating product variant family', error: error.message });
+        console.error('UPDATE PRODUCT VARIANT FAMILY ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error updating product variant family' });
     } finally {
         client.release();
     }
@@ -561,8 +589,48 @@ export const searchProducts = async (req, res) => {
         console.error("SEARCH PRODUCTS ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: 'Error searching products',
-            error: error.message
+            message: 'Internal server error'
         });
+    }
+};
+
+export const getAllAdminProducts = async (req, res) => {
+    try {
+        const query = `
+            SELECT p.*, s.store_name as seller_name,
+            COALESCE((SELECT AVG(rating)::numeric(10,1) FROM reviews WHERE product_id = p.product_id AND variant_id IS NULL), 0) as rating,
+            (SELECT COUNT(*) FROM reviews WHERE product_id = p.product_id AND variant_id IS NULL) as reviews_count,
+            (SELECT json_agg(pi.* ORDER BY pi.sort_order) FROM product_images pi WHERE pi.product_id = p.product_id) as pi_images,
+            (SELECT json_agg(pv.*) FROM product_variants pv WHERE pv.product_id = p.product_id) as variants
+            FROM products p 
+            LEFT JOIN sellers s ON p.seller_id = s.seller_id
+            WHERE p.deleted_at IS NULL
+            ORDER BY p.created_at DESC
+        `;
+        const result = await pool.query(query);
+        return res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+        console.error("GET ALL ADMIN PRODUCTS ERROR:", error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+export const getProductStats = async (req, res) => {
+    try {
+        const statsQuery = `
+            SELECT 
+                COUNT(*) as total_products,
+                COUNT(*) FILTER (WHERE stock_quantity > 0) as in_stock,
+                COUNT(*) FILTER (WHERE stock_quantity = 0) as out_of_stock,
+                (SELECT COUNT(*) FROM categories WHERE is_active = true) as total_categories,
+                COALESCE(AVG(price), 0) as avg_price
+            FROM products
+            WHERE deleted_at IS NULL
+        `;
+        const statsResult = await pool.query(statsQuery);
+        return res.status(200).json({ success: true, data: statsResult.rows[0] });
+    } catch (error) {
+        console.error("GET PRODUCT STATS ERROR:", error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };

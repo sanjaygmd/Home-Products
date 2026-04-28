@@ -36,6 +36,11 @@ const syncWishlistSummary = async (client, wishlist_id) => {
 // GET /wishlist/:customer_id
 export const getWishlist = async (req, res) => {
     const { customer_id } = req.params;
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to wishlist' });
+    }
+
     try {
         const result = await pool.query(
             `SELECT 
@@ -73,8 +78,8 @@ export const getWishlist = async (req, res) => {
             data: result.rows 
         });
     } catch (error) {
-        console.error('GET WISHLIST ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error fetching wishlist', error: error.message });
+        console.error('FETCH WISHLIST ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error fetching wishlist' });
     }
 };
 
@@ -85,6 +90,11 @@ export const addToWishlist = async (req, res) => {
     if (!customer_id || !product_id) {
         return res.status(400).json({ success: false, message: 'customer_id and product_id are required' });
     }
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only add items to your own wishlist' });
+    }
+
 
     const client = await pool.connect();
     try {
@@ -113,8 +123,8 @@ export const addToWishlist = async (req, res) => {
         return res.status(200).json({ success: true, message: 'Item added to wishlist' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('ADD TO WISHLIST ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error adding to wishlist', error: error.message });
+        console.error('ADD TO WISHLIST ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error adding to wishlist' });
     } finally {
         client.release();
     }
@@ -125,7 +135,22 @@ export const removeFromWishlist = async (req, res) => {
     const { wishlist_item_id } = req.params;
     const client = await pool.connect();
     try {
+        // Ownership Check
+        const ownershipCheck = await client.query(
+            "SELECT w.customer_id FROM wishlist w JOIN wishlist_items wi ON w.wishlist_id = wi.wishlist_id WHERE wi.wishlist_item_id = $1",
+            [wishlist_item_id]
+        );
+
+        if (ownershipCheck.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Wishlist item not found' });
+        }
+
+        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this wishlist item' });
+        }
+
         await client.query('BEGIN');
+
         const result = await client.query('DELETE FROM wishlist_items WHERE wishlist_item_id = $1 RETURNING wishlist_id', [wishlist_item_id]);
         
         if (result.rows.length > 0) {
@@ -137,8 +162,8 @@ export const removeFromWishlist = async (req, res) => {
         return res.status(200).json({ success: true, message: 'Item removed from wishlist' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('REMOVE FROM WISHLIST ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error removing from wishlist', error: error.message });
+        console.error('REMOVE FROM WISHLIST ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error removing from wishlist' });
     } finally {
         client.release();
     }
@@ -147,9 +172,15 @@ export const removeFromWishlist = async (req, res) => {
 // DELETE /wishlist/clear/:customer_id
 export const clearWishlist = async (req, res) => {
     const { customer_id } = req.params;
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only clear your own wishlist' });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
         const wishlistRes = await client.query('SELECT wishlist_id FROM wishlist WHERE customer_id = $1', [customer_id]);
         if (wishlistRes.rows.length > 0) {
             const wishlist_id = wishlistRes.rows[0].wishlist_id;
@@ -163,8 +194,8 @@ export const clearWishlist = async (req, res) => {
         return res.status(200).json({ success: true, message: 'Wishlist cleared' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('CLEAR WISHLIST ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error clearing wishlist', error: error.message });
+        console.error('CLEAR WISHLIST ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error clearing wishlist' });
     } finally {
         client.release();
     }

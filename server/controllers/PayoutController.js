@@ -3,6 +3,11 @@ import { pool } from '../configs/db.js';
 // Get earnings summary for a seller
 export const getSellerEarningsSummary = async (req, res) => {
     const { sellerId } = req.params;
+
+    if (req.user.type === 'seller' && req.user.id !== sellerId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to earnings' });
+    }
+
     try {
         const result = await pool.query(`
             SELECT 
@@ -18,13 +23,20 @@ export const getSellerEarningsSummary = async (req, res) => {
 
         res.status(200).json({ success: true, data: result.rows[0] });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching earnings summary", error: error.message });
+        console.error('GET EARNINGS SUMMARY ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching earnings summary" });
     }
 };
+
 
 // Get payout history for a seller
 export const getSellerPayoutHistory = async (req, res) => {
     const { sellerId } = req.params;
+
+    if (req.user.type === 'seller' && req.user.id !== sellerId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to payout history' });
+    }
+
     try {
         const result = await pool.query(
             "SELECT * FROM seller_payouts WHERE seller_id = $1 ORDER BY created_at DESC",
@@ -32,13 +44,20 @@ export const getSellerPayoutHistory = async (req, res) => {
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching payout history", error: error.message });
+        console.error('GET PAYOUT HISTORY ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching payout history" });
     }
 };
+
 
 // Get all pending commissions for a seller (eligible for payout)
 export const getPendingCommissions = async (req, res) => {
     const { sellerId } = req.params;
+
+    if (req.user.type === 'seller' && req.user.id !== sellerId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to commissions' });
+    }
+
     try {
         const result = await pool.query(`
             SELECT sc.* FROM seller_commissions sc
@@ -50,19 +69,40 @@ export const getPendingCommissions = async (req, res) => {
         `, [sellerId]);
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching pending commissions", error: error.message });
+        console.error('GET PENDING COMMISSIONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching pending commissions" });
     }
 };
+
 
 // Seller: Request a payout for current pending balance
 export const requestPayout = async (req, res) => {
     const { seller_id, notes } = req.body;
 
+    if (req.user.type === 'seller' && req.user.id !== seller_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only request payouts for your own account' });
+    }
+
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // 1. Calculate total withdrawable balance (Only from Delivered orders)
+        // 1a. Check for any existing 'Requested' or 'Processing' payouts for this seller
+        const activePayoutCheck = await client.query(
+            "SELECT payout_id FROM seller_payouts WHERE seller_id = $1 AND status IN ('Requested', 'Processing')",
+            [seller_id]
+        );
+
+        if (activePayoutCheck.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ 
+                success: false, 
+                message: "You already have a payout request in progress. Please wait for it to be completed before requesting another." 
+            });
+        }
+
+        // 1b. Calculate total withdrawable balance (Only from Delivered orders)
         const balanceRes = await client.query(`
             SELECT 
                 COALESCE(SUM(sc.seller_earnings), 0) as balance, 
@@ -112,10 +152,9 @@ export const requestPayout = async (req, res) => {
         console.error("REQUEST PAYOUT ERROR:", error);
         res.status(500).json({
             success: false,
-            message: "Failed to request payout",
-            error: error.message,
-            detail: error.detail
+            message: "Failed to request payout"
         });
+
     } finally {
         client.release();
     }
@@ -132,9 +171,11 @@ export const getAllPayouts = async (req, res) => {
         `);
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching payouts", error: error.message });
+        console.error('GET ALL PAYOUTS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching payouts" });
     }
 };
+
 
 // Admin: Update payout status (Approve/Reject)
 export const updatePayoutStatus = async (req, res) => {
@@ -205,9 +246,9 @@ export const updatePayoutStatus = async (req, res) => {
         console.error("UPDATE PAYOUT STATUS ERROR:", error);
         res.status(500).json({ 
             success: false, 
-            message: "Failed to update payout status", 
-            error: error.message
+            message: "Failed to update payout status"
         });
+
     } finally {
         client.release();
     }
@@ -254,8 +295,10 @@ export const initiatePayout = async (req, res) => {
         res.status(200).json({ success: true, message: "Payout processed successfully", payout_id: payoutId });
     } catch (error) {
         await client.query('ROLLBACK');
-        res.status(500).json({ success: false, message: "Failed to initiate payout", error: error.message });
+        console.error("INITIATE PAYOUT ERROR:", error);
+        res.status(500).json({ success: false, message: "Failed to initiate payout" });
     } finally {
+
         client.release();
     }
 };

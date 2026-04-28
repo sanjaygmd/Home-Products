@@ -1,7 +1,7 @@
 import { card, buttonSecondary } from "../../utils/UIStyles";
 import { useNavigate } from "react-router-dom";
 import emailjs from "emailjs-com";
-import { useContext } from "react";
+import { useContext, useState } from "react";
 import { CartContext } from "../../context/CartContext/CartContext";
 import { ProductContext } from "../../context/ProductContext/ProductContext";
 import { createOrder } from "../../services/orderService";
@@ -9,6 +9,8 @@ import { cn } from "../../lib/utils";
 
 const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, appliedCoupon }) => {
   const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const [isPlacing, setIsPlacing] = useState(false);
   const { cart, fetchCart } = useContext(CartContext);
   const { fetchProducts } = useContext(ProductContext);
 
@@ -16,8 +18,8 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
   const isAdmin = user?.role === 'admin';
 
   const subtotalValue = items.reduce((acc, item) => acc + (item.discountPrice || item.price) * (item.quantity || 1), 0);
-  const discountValue = appliedCoupon 
-    ? Math.min((subtotalValue * appliedCoupon.discount_percent) / 100, appliedCoupon.max_discount || Infinity) 
+  const discountValue = appliedCoupon
+    ? Math.min((subtotalValue * appliedCoupon.discount_percent) / 100, appliedCoupon.max_discount || Infinity)
     : 0;
 
   const sendOrderEmail = (orderId) => {
@@ -51,9 +53,11 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
 
   const handlePlaceOrder = async () => {
     if (isAdmin) {
-      alert("As an administrator, you cannot place orders. Please use a customer account.");
+      setError("As an administrator, you cannot place orders. Please use a customer account.");
       return;
     }
+    setError("");
+    setIsPlacing(true);
     try {
       const orderData = {
         customer_id: user.id || user.customer_id || user.admin_id,
@@ -84,10 +88,16 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
       if (paymentMethod === "cod") {
         const response = await createOrder(orderData);
         if (response.success) {
-          sendOrderEmail(response.order_id);
-          fetchCart(); 
-          if (fetchProducts) fetchProducts();
-          navigate("/order-success");
+          try {
+            sendOrderEmail(response.order_id);
+            fetchCart();
+            if (fetchProducts) fetchProducts();
+          } catch (cleanupErr) {
+            console.error("Cleanup error after COD success:", cleanupErr);
+          }
+          navigate("/order-success", { state: { orderId: response.order_id } });
+        } else {
+          setError(response.message || "Failed to place order. Please try again.");
         }
       } else {
         const options = {
@@ -98,15 +108,26 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
           description: "Order Payment",
 
           handler: async function (response) {
-            const dbResponse = await createOrder({
+            try {
+              const dbResponse = await createOrder({
                 ...orderData,
                 payment_id: response.razorpay_payment_id
-            });
-            if (dbResponse.success) {
-                sendOrderEmail(dbResponse.order_id);
-                fetchCart(); 
-                if (fetchProducts) fetchProducts();
-                navigate("/order-success");
+              });
+              if (dbResponse.success) {
+                try {
+                  sendOrderEmail(dbResponse.order_id);
+                  fetchCart();
+                  if (fetchProducts) fetchProducts();
+                } catch (cleanupErr) {
+                  console.error("Cleanup error after order success:", cleanupErr);
+                }
+                navigate("/order-success", { state: { orderId: dbResponse.order_id } });
+              } else {
+                setError(dbResponse.message || "Payment recorded but order registration failed. Contact support.");
+              }
+            } catch (err) {
+              console.error("Order completion failed:", err);
+              setError("Payment was successful but order registration failed. Please contact support.");
             }
           },
 
@@ -124,9 +145,11 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
         const rzp = new window.Razorpay(options);
         rzp.open();
       }
-    } catch (error) {
-      console.error("Order placement failed:", error);
-      alert("Failed to place order. Please try again.");
+    } catch (err) {
+      console.error("Order placement failed:", err);
+      setError(err.response?.data?.message || "Failed to place order. Please try again.");
+    } finally {
+      setIsPlacing(false);
     }
   };
 
@@ -191,27 +214,37 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
         <span className="text-2xl font-bold text-blue-600">₹{total}</span>
       </div>
 
-      <div className="flex justify-between pt-2">
-        <button onClick={onBack} className={buttonSecondary}>
-          ← Back
-        </button>
+      <div className="flex flex-col items-end gap-3 pt-2">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-2 rounded-xl text-xs font-bold animate-pulse">
+            ⚠️ {error}
+          </div>
+        )}
 
-        <div className="flex flex-col items-end gap-2">
-          {isAdmin && (
-            <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Admin Restricted</p>
-          )}
-          <button
-            onClick={handlePlaceOrder}
-            disabled={isAdmin}
-            className={cn(
-              "px-8 py-3 rounded-xl shadow transition-all font-bold",
-              isAdmin 
-                ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
-                : "bg-green-600 text-white hover:bg-green-700 active:scale-95"
-            )}
-          >
-            {isAdmin ? "Restricted" : "Place Order"}
+        <div className="flex justify-between w-full pt-2">
+          <button onClick={onBack} className={buttonSecondary}>
+            ← Back
           </button>
+
+          <div className="flex flex-col items-end gap-2">
+            {isAdmin && (
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Admin Restricted</p>
+            )}
+            <button
+              onClick={handlePlaceOrder}
+              disabled={isAdmin || isPlacing}
+              className={cn(
+                "px-8 py-3 rounded-xl shadow transition-all font-bold",
+                isAdmin
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  : isPlacing
+                    ? "bg-green-400 text-white cursor-wait"
+                    : "bg-green-600 text-white hover:bg-green-700 active:scale-95"
+              )}
+            >
+              {isPlacing ? "Processing..." : isAdmin ? "Restricted" : "Place Order"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

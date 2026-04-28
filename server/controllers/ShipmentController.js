@@ -6,7 +6,9 @@ import {
     getShiprocketServiceability,
     assignShiprocketAWB,
     generateShiprocketPickup,
-    createShiprocketReturn as srCreateReturn
+    createShiprocketReturn as srCreateReturn,
+    getShiprocketPickupLocations,
+    addShiprocketPickupLocation
 } from '../utils/shiprocket.js';
 
 export const createShiprocketReturn = async (payload) => {
@@ -20,166 +22,201 @@ import { sendOrderStatusNotifications } from '../utils/notifications.js';
  * @param {object} client - Optional DB client for transaction
  */
 export const pushOrderToShiprocket = async (orderId, client = pool) => {
-    // 1. Fetch Order Details with Customer Address
-    const orderRes = await client.query(`
-        SELECT o.*, a.full_name, a.phone, a.address_line_1, a.city, a.state, a.pincode, c.email
-        FROM orders o
-        JOIN addresses a ON o.address_id = a.address_id
-        JOIN customers c ON o.customer_id = c.customer_id
-        WHERE o.order_id = $1
-    `, [orderId]);
+    try {
+        console.log(`\n[SHIPROCKET] === STARTING DISPATCH FOR ORDER: ${orderId} ===`);
+        
+        // 1. Fetch Order Details with Customer Address
+        const orderRes = await client.query(`
+            SELECT o.*, a.full_name, a.phone, a.address_line_1, a.city, a.state, a.pincode, c.email
+            FROM orders o
+            JOIN addresses a ON o.address_id = a.address_id
+            JOIN customers c ON o.customer_id = c.customer_id
+            WHERE o.order_id = $1
+        `, [orderId]);
 
-    if (orderRes.rows.length === 0) {
-        throw new Error("Order not found");
-    }
-
-    const order = orderRes.rows[0];
-
-    // 2. Fetch Order Items with Product Weight/Dimensions
-    const itemsRes = await client.query(`
-        SELECT oi.*, p.name as product_name, p.sku, p.weight, p.length, p.breadth, p.height
-        FROM order_items oi
-        JOIN products p ON oi.product_id = p.product_id
-        WHERE oi.order_id = $1
-    `, [orderId]);
-
-    const items = itemsRes.rows;
-
-    // 3. Get Default Pickup Location for the primary seller
-    const firstSellerId = items[0].seller_id;
-    const pickupRes = await client.query(`
-        SELECT * FROM seller_pickup_location 
-        WHERE seller_id = $1 AND is_default = true
-        LIMIT 1
-    `, [firstSellerId]);
-
-    if (pickupRes.rows.length === 0) {
-        throw new Error(`Seller (ID: ${firstSellerId}) has no default pickup location. Please add one in Seller Dashboard.`);
-    }
-
-    const pickupLocation = pickupRes.rows[0];
-
-    // 4. Prepare Shiprocket Payload
-    const nameParts = (order.full_name || "Customer").trim().split(/\s+/);
-    const firstName = nameParts[0] || "Customer";
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
-    let cleanedPhone = order.phone ? order.phone.replace(/\D/g, '') : '';
-    if (cleanedPhone.length > 10 && cleanedPhone.startsWith('91')) {
-        cleanedPhone = cleanedPhone.substring(cleanedPhone.length - 10);
-    }
-    const validPhone = cleanedPhone.length >= 10 ? cleanedPhone.substring(0, 10) : "9876543210";
-    
-    console.log(`\n[SHIPROCKET LOG] Initiating dispatch for Order ID: ${orderId}`);
-    console.log(`[SHIPROCKET LOG] Fetched ${items.length} items. Pickup location: ${pickupLocation.location_name}`);
-
-    const srOrderItems = items.map(item => ({
-        name: item.product_name,
-        sku: item.sku || item.product_id.slice(0, 8),
-        units: item.quantity,
-        selling_price: Number(item.unit_price)
-    }));
-
-    const additionalFees = Number(order.tax_amount || 0) + Number(order.platform_fee || 0) + Number(order.cod_fee || 0);
-    if (additionalFees > 0) {
-        srOrderItems.push({
-            name: "Taxes & Platform Fees",
-            sku: "TAX-FEE",
-            units: 1,
-            selling_price: additionalFees
-        });
-    }
-
-    const srPayload = {
-        order_id: order.order_id.toString().slice(0, 20),
-        order_date: new Date(order.placed_at).toISOString().split('T')[0],
-        pickup_location: pickupLocation.location_name,
-        billing_customer_name: firstName,
-        billing_last_name: lastName,
-        billing_address: order.address_line_1,
-        billing_city: order.city,
-        billing_pincode: order.pincode,
-        billing_state: order.state,
-        billing_country: "India",
-        billing_email: order.email,
-        billing_phone: validPhone,
-        shipping_is_billing: true,
-        order_items: srOrderItems,
-        payment_method: order.payment_method === 'cod' ? 'COD' : 'Prepaid',
-        sub_total: Number(order.subtotal) + additionalFees,
-        shipping_charges: Number(order.shipping_charges || 0),
-        total_discount: Number(order.discount_amount || 0),
-        length: Math.max(...items.map(i => Number(i.length) || 10)),
-        breadth: Math.max(...items.map(i => Number(i.breadth) || 10)),
-        height: Math.max(...items.map(i => Number(i.height) || 10)),
-        weight: items.reduce((acc, i) => acc + (Number(i.weight) || 0.5) * i.quantity, 0)
-    };
-
-    // 5. STEP 1: Create Order in Shiprocket
-    const srOrderRes = await createShiprocketOrder(srPayload);
-
-    if (!srOrderRes || !srOrderRes.order_id) {
-        throw new Error(srOrderRes.message || "Shiprocket: Failed to create order. Check terminal for raw API response.");
-    }
-
-    const srOrderId = srOrderRes.order_id;
-    const shipmentId = srOrderRes.shipment_id;
-
-    // 6. STEP 2: Intelligent Courier Selection (Serviceability)
-    const svcParams = {
-        pickup_postcode: pickupLocation.pincode,
-        delivery_postcode: order.pincode,
-        weight: srPayload.weight,
-        cod: order.payment_method === 'cod' ? 1 : 0,
-        is_return: 0
-    };
-    
-    const svcRes = await getShiprocketServiceability(svcParams);
-    let selectedCourierId = null;
-    let courierName = "Shiprocket Auto";
-
-    if (svcRes && svcRes.status === 200 && svcRes.data.available_courier_companies.length > 0) {
-        // Sort by price (cheapest) or rating (best). Let's go with cheapest for auto-pilot.
-        const bestCourier = svcRes.data.available_courier_companies.sort((a, b) => Number(a.rate) - Number(b.rate))[0];
-        selectedCourierId = bestCourier.courier_company_id;
-        courierName = bestCourier.courier_name;
-    }
-
-    // 7. STEP 3: Assign AWB
-    let awbCode = null;
-    if (selectedCourierId) {
-        const awbRes = await assignShiprocketAWB({
-            shipment_id: shipmentId,
-            courier_id: selectedCourierId
-        });
-        if (awbRes.status === 200) {
-            awbCode = awbRes.response.data.awb_code;
+        if (orderRes.rows.length === 0) {
+            console.error(`[SHIPROCKET] Error: Order ${orderId} not found in DB.`);
+            return;
         }
+
+        const order = orderRes.rows[0];
+
+        // 2. Fetch Order Items with Product Weight/Dimensions
+        const itemsRes = await client.query(`
+            SELECT oi.*, p.name as product_name, p.sku, p.weight, p.length, p.breadth, p.height
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.product_id
+            WHERE oi.order_id = $1
+        `, [orderId]);
+
+        const items = itemsRes.rows;
+        if (items.length === 0) {
+            console.error(`[SHIPROCKET] Error: No items found for order ${orderId}.`);
+            return;
+        }
+
+        // 3. Get Default Pickup Location for the primary seller
+        const firstSellerId = items[0].seller_id;
+        const pickupRes = await client.query(`
+            SELECT * FROM seller_pickup_location 
+            WHERE seller_id = $1 AND is_default = true
+            LIMIT 1
+        `, [firstSellerId]);
+
+        if (pickupRes.rows.length === 0) {
+            console.warn(`[SHIPROCKET] Warning: Seller ${firstSellerId} has no default pickup location.`);
+            return;
+        }
+
+        const pickupLocation = pickupRes.rows[0];
+        console.log(`[SHIPROCKET] Pickup location: ${pickupLocation.location_name}`);
+
+        // 4. Prepare Shiprocket Payload
+        const nameParts = (order.full_name || "Customer").trim().split(/\s+/);
+        const firstName = nameParts[0] || "Customer";
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
+        let cleanedPhone = order.phone ? order.phone.replace(/\D/g, '') : '';
+        if (cleanedPhone.length > 10 && cleanedPhone.startsWith('91')) {
+            cleanedPhone = cleanedPhone.substring(cleanedPhone.length - 10);
+        }
+        const validPhone = cleanedPhone.length >= 10 ? cleanedPhone.substring(0, 10) : "9876543210";
+        
+        const srOrderItems = items.map(item => ({
+            name: item.product_name,
+            sku: item.sku || (item.product_id ? item.product_id.slice(0, 8) : "PROD"),
+            units: item.quantity,
+            selling_price: Number(item.unit_price)
+        }));
+
+        const additionalFees = Number(order.tax_amount || 0) + Number(order.platform_fee || 0) + Number(order.cod_fee || 0);
+        if (additionalFees > 0) {
+            srOrderItems.push({
+                name: "Taxes & Platform Fees",
+                sku: "TAX-FEE",
+                units: 1,
+                selling_price: additionalFees
+            });
+        }
+
+        const srPayload = {
+            order_id: order.order_id.toString().slice(0, 20),
+            order_date: new Date(order.placed_at).toISOString().split('T')[0],
+            pickup_location: pickupLocation.location_name,
+            billing_customer_name: firstName,
+            billing_last_name: lastName,
+            billing_address: order.address_line_1,
+            billing_city: order.city,
+            billing_pincode: order.pincode,
+            billing_state: order.state,
+            billing_country: "India",
+            billing_email: order.email,
+            billing_phone: validPhone,
+            shipping_is_billing: true,
+            order_items: srOrderItems,
+            payment_method: order.payment_method === 'cod' ? 'COD' : 'Prepaid',
+            sub_total: Number(order.subtotal) + additionalFees,
+            shipping_charges: Number(order.shipping_charges || 0),
+            total_discount: Number(order.discount_amount || 0),
+            length: Math.max(...items.map(i => Number(i.length) || 10)),
+            breadth: Math.max(...items.map(i => Number(i.breadth) || 10)),
+            height: Math.max(...items.map(i => Number(i.height) || 10)),
+            weight: items.reduce((acc, i) => acc + (Number(i.weight) || 0.5) * i.quantity, 0)
+        };
+
+        // 5. STEP 1: Create Order in Shiprocket
+        console.log(`[SHIPROCKET] Calling createShiprocketOrder...`);
+        let srOrderRes = await createShiprocketOrder(srPayload);
+
+        // [FIX] Auto-Sync: If pickup location is missing, register it and retry
+        if (srOrderRes && srOrderRes.message && srOrderRes.message.toLowerCase().includes('pickup location')) {
+            console.log(`[SHIPROCKET AUTO-SYNC] Detected pickup location error for "${pickupLocation.location_name}".`);
+            
+            try {
+                const syncRes = await addShiprocketPickupLocation(pickupLocation);
+                console.log(`[SHIPROCKET AUTO-SYNC] Registration response:`, JSON.stringify(syncRes));
+
+                if (syncRes && (syncRes.success || syncRes.status_code === 200)) {
+                    console.log(`[SHIPROCKET AUTO-SYNC] Successfully registered ${pickupLocation.location_name}. Waiting 1.5s for propagation...`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    console.log(`[SHIPROCKET AUTO-SYNC] Retrying order creation...`);
+                    srOrderRes = await createShiprocketOrder(srPayload);
+                } else {
+                    console.warn(`[SHIPROCKET AUTO-SYNC] Failed to register pickup location:`, syncRes?.message || 'Unknown error');
+                }
+            } catch (syncError) {
+                console.error(`[SHIPROCKET AUTO-SYNC] Exception during registration:`, syncError.message);
+            }
+        }
+
+        if (!srOrderRes || !srOrderRes.order_id) {
+            console.error(`[SHIPROCKET] Error Response:`, JSON.stringify(srOrderRes));
+            throw new Error(srOrderRes.message || "Shiprocket: Failed to create order.");
+        }
+
+        console.log(`[SHIPROCKET] Order created successfully. SR_ID: ${srOrderRes.order_id}`);
+        const srOrderId = srOrderRes.order_id;
+        const shipmentId = srOrderRes.shipment_id;
+
+        // 6. STEP 2: Intelligent Courier Selection (Serviceability)
+        const svcParams = {
+            pickup_postcode: pickupLocation.pincode,
+            delivery_postcode: order.pincode,
+            weight: srPayload.weight,
+            cod: order.payment_method === 'cod' ? 1 : 0,
+            is_return: 0
+        };
+        
+        const svcRes = await getShiprocketServiceability(svcParams);
+        let selectedCourierId = null;
+        let courierName = "Shiprocket Auto";
+
+        if (svcRes && svcRes.status === 200 && svcRes.data.available_courier_companies.length > 0) {
+            const bestCourier = svcRes.data.available_courier_companies.sort((a, b) => Number(a.rate) - Number(b.rate))[0];
+            selectedCourierId = bestCourier.courier_company_id;
+            courierName = bestCourier.courier_name;
+        }
+
+        // 7. STEP 3: Assign AWB
+        let awbCode = null;
+        if (selectedCourierId) {
+            const awbRes = await assignShiprocketAWB({
+                shipment_id: shipmentId,
+                courier_id: selectedCourierId
+            });
+            if (awbRes.status === 200) {
+                awbCode = awbRes.response.data.awb_code;
+            }
+        }
+
+        // 8. STEP 4: Generate Pickup
+        if (awbCode) {
+            await generateShiprocketPickup([shipmentId]);
+        }
+
+        // 9. Save to shiprocket_orders table
+        await client.query(`
+            INSERT INTO shiprocket_orders (
+                sr_order_id, order_id, shipment_id, sr_status, awb_code, courier_name, sr_created_at, updated_at
+            ) VALUES ($1, $2, $3, 'READY_TO_SHIP', $4, $5, NOW(), NOW())
+            ON CONFLICT (order_id) DO UPDATE SET 
+                shipment_id = EXCLUDED.shipment_id,
+                sr_status = EXCLUDED.sr_status,
+                awb_code = EXCLUDED.awb_code,
+                courier_name = EXCLUDED.courier_name,
+                updated_at = NOW()
+        `, [srOrderId.toString(), order.order_id, shipmentId.toString(), awbCode, courierName]);
+
+        console.log(`[SHIPROCKET] === DISPATCH COMPLETED FOR ORDER: ${orderId} ===`);
+        return { 
+            sr_order_id: srOrderId, 
+            shipment_id: shipmentId, 
+            awb_code: awbCode, 
+            courier: courierName 
+        };
+    } catch (error) {
+        console.error(`[SHIPROCKET FATAL ERROR] Order ${orderId}:`, error.message);
+        throw error;
     }
-
-    // 8. STEP 4: Generate Pickup
-    if (awbCode) {
-        await generateShiprocketPickup([shipmentId]);
-    }
-
-    // 9. Save to shiprocket_orders table
-    await client.query(`
-        INSERT INTO shiprocket_orders (
-            sr_order_id, order_id, shipment_id, sr_status, awb_code, courier_name, sr_created_at, updated_at
-        ) VALUES ($1, $2, $3, 'READY_TO_SHIP', $4, $5, NOW(), NOW())
-        ON CONFLICT (order_id) DO UPDATE SET 
-            shipment_id = EXCLUDED.shipment_id,
-            sr_status = EXCLUDED.sr_status,
-            awb_code = EXCLUDED.awb_code,
-            courier_name = EXCLUDED.courier_name,
-            updated_at = NOW()
-    `, [srOrderId.toString(), order.order_id, shipmentId.toString(), awbCode, courierName]);
-
-    return { 
-        sr_order_id: srOrderId, 
-        shipment_id: shipmentId, 
-        awb_code: awbCode, 
-        courier: courierName 
-    };
 };
 
 /**
@@ -306,6 +343,15 @@ export const syncTracking = async (req, res) => {
 export const handleShiprocketWebhook = async (req, res) => {
     // Shiprocket expects a 200 OK fast.
     res.status(200).send('OK');
+
+    // 1. Verify Webhook Token (Security Guard)
+    const token = req.headers['x-api-key'] || req.query.token;
+    const expectedToken = process.env.SHIPROCKET_WEBHOOK_TOKEN;
+    
+    if (!expectedToken || token !== expectedToken) {
+        console.warn("[WEBHOOK] Unauthorized access attempt detected.");
+        return res.status(401).send('Unauthorized');
+    }
 
     const payload = req.body;
     if (!payload || !payload.awb) return;

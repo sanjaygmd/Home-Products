@@ -68,7 +68,9 @@ export default function ProductsPage() {
     setLoading(true);
     try {
       const resp = await api.get('/user/admin/products');
-      setProducts(Array.isArray(resp.data) ? resp.data : []);
+      if (resp.data.success) {
+        setProducts(Array.isArray(resp.data.data) ? resp.data.data : []);
+      }
     } catch (err) {
       console.error('Fetch products failed:', err);
       setProducts([]);

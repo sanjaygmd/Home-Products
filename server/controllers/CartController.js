@@ -42,6 +42,11 @@ const syncCartSummary = async (client, cart_id) => {
 // GET /cart/:customer_id
 export const getCart = async (req, res) => {
     const { customer_id } = req.params;
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized access to cart' });
+    }
+
     try {
         const result = await pool.query(
             `SELECT 
@@ -83,8 +88,8 @@ export const getCart = async (req, res) => {
             data: result.rows 
         });
     } catch (error) {
-        console.error('GET CART ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error fetching cart', error: error.message });
+        console.error('FETCH CART ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error fetching cart' });
     }
 };
 
@@ -98,6 +103,11 @@ export const addToCart = async (req, res) => {
     if (!customer_id || !product_id || !price) {
         return res.status(400).json({ success: false, message: 'customer_id, product_id and price are required' });
     }
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only add items to your own cart' });
+    }
+
 
     const client = await pool.connect();
     try {
@@ -173,8 +183,8 @@ export const addToCart = async (req, res) => {
         });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('ADD TO CART ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error adding to cart', error: error.message });
+        console.error('ADD TO CART ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error adding to cart' });
     } finally {
         client.release();
     }
@@ -190,7 +200,22 @@ export const updateCartItem = async (req, res) => {
 
     const client = await pool.connect();
     try {
+        // Ownership Check
+        const ownershipCheck = await client.query(
+            "SELECT c.customer_id FROM cart c JOIN cart_items ci ON c.cart_id = ci.cart_id WHERE ci.cart_item_id = $1",
+            [cart_item_id]
+        );
+
+        if (ownershipCheck.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Cart item not found' });
+        }
+
+        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
+        }
+
         await client.query('BEGIN');
+
         let result;
         if (quantity <= 0) {
             result = await client.query('DELETE FROM cart_items WHERE cart_item_id = $1 RETURNING cart_id', [cart_item_id]);
@@ -214,8 +239,8 @@ export const updateCartItem = async (req, res) => {
         });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('UPDATE CART ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error updating cart item', error: error.message });
+        console.error('UPDATE CART ITEM ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error updating cart item' });
     } finally {
         client.release();
     }
@@ -226,7 +251,22 @@ export const removeFromCart = async (req, res) => {
     const { cart_item_id } = req.params;
     const client = await pool.connect();
     try {
+        // Ownership Check
+        const ownershipCheck = await client.query(
+            "SELECT c.customer_id FROM cart c JOIN cart_items ci ON c.cart_id = ci.cart_id WHERE ci.cart_item_id = $1",
+            [cart_item_id]
+        );
+
+        if (ownershipCheck.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Cart item not found' });
+        }
+
+        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
+        }
+
         await client.query('BEGIN');
+
         const result = await client.query('DELETE FROM cart_items WHERE cart_item_id = $1 RETURNING cart_id', [cart_item_id]);
         
         if (result.rows.length > 0) {
@@ -238,8 +278,8 @@ export const removeFromCart = async (req, res) => {
         return res.status(200).json({ success: true, message: 'Item removed from cart' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('REMOVE FROM CART ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error removing from cart', error: error.message });
+        console.error('REMOVE FROM CART ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error removing from cart' });
     } finally {
         client.release();
     }
@@ -248,9 +288,15 @@ export const removeFromCart = async (req, res) => {
 // DELETE /cart/clear/:customer_id
 export const clearCart = async (req, res) => {
     const { customer_id } = req.params;
+
+    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized: You can only clear your own cart' });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
         
         const cartRes = await client.query('SELECT cart_id FROM cart WHERE customer_id = $1', [customer_id]);
         if (cartRes.rows.length > 0) {
@@ -266,8 +312,8 @@ export const clearCart = async (req, res) => {
         return res.status(200).json({ success: true, message: 'Cart cleared' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('CLEAR CART ERROR:', error.message);
-        return res.status(500).json({ success: false, message: 'Error clearing cart', error: error.message });
+        console.error('CLEAR CART ERROR:', error);
+        return res.status(500).json({ success: false, message: 'Error clearing cart' });
     } finally {
         client.release();
     }

@@ -176,7 +176,9 @@ export default function OrdersPage() {
     setLoadingOrders(true);
     try {
       const resp = await api.get('/user/admin/orders');
-      setOrders(Array.isArray(resp.data) ? resp.data : []);
+      if (resp.data.success) {
+        setOrders(Array.isArray(resp.data.data) ? resp.data.data : []);
+      }
       setSelectedIds(new Set()); // Reset on fetch
     } catch (err) {
       console.error('Fetch error:', err);

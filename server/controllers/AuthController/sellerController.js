@@ -1,5 +1,5 @@
 import { pool } from "../../configs/db.js";
-import { createAuthSession, invalidateSession } from "../../utils/authSession.js";
+import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 
 export const logoutSeller = async (req, res) => {
   try {
@@ -7,15 +7,21 @@ export const logoutSeller = async (req, res) => {
     if (sessionId) {
       await invalidateSession(sessionId);
     }
+    res.clearCookie('token', { path: '/' });
+    res.clearCookie('admin_token', { path: '/' });
+    res.clearCookie('seller_token', { path: '/' });
+    res.clearCookie('customer_token', { path: '/' });
     return res.status(200).json({ success: true, message: "Logout successful" });
+
   } catch (error) {
+    console.error("LOGOUT ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: 'Seller logout failed',
-      error: error.message
+      message: 'Seller logout failed'
     })
   }
 }
+
 
 export const loginSeller = async (req, res) => {
   try {
@@ -33,8 +39,8 @@ export const loginSeller = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email format" });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    if (password.length < 8) {
+      return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
     const existingUser = await pool.query("SELECT * FROM sellers WHERE email = $1", [email])
@@ -68,6 +74,8 @@ export const loginSeller = async (req, res) => {
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(user.seller_id, 'seller', ip, device);
 
+    setSessionCookie(res, 'seller', session.token);
+
     return res.status(200).json({
       success: true,
       message: 'Logging as seller successful',
@@ -84,14 +92,16 @@ export const loginSeller = async (req, res) => {
     })
 
 
+
   } catch (error) {
+    console.error("SELLER LOGIN ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: 'Seller login failed',
-      error: error.message
+      message: 'Seller login failed'
     })
   }
 }
+
 
 export const registerSeller = async (req, res) => {
   try {
@@ -138,10 +148,10 @@ export const registerSeller = async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters",
+        message: "Password must be at least 8 characters",
       });
     }
 
@@ -168,19 +178,32 @@ export const registerSeller = async (req, res) => {
       [`New Seller Registration: ${full_name} (${store_name}) has joined the platform!`]
     );
 
+    // Create Auth Session automatically on register
+    const ip = req.ip || req.connection.remoteAddress;
+    const device = { agent: req.get('User-Agent') };
+    const session = await createAuthSession(result.rows[0].seller_id, 'seller', ip, device);
+
+    setSessionCookie(res, 'seller', session.token);
+
     return res.status(201).json({
       success: true,
       message: "Seller registered successfully",
-      data: result.rows[0],
+      data: {
+        ...result.rows[0],
+        sessionId: session.sessionId,
+        token: session.token
+      },
     });
+
   } catch (error) {
+    console.error("SELLER REGISTER ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: "Registering seller failed",
-      error: error.message,
+      message: "Registering seller failed"
     });
   }
 };
+
 
 export const sellerOnboarding = async (req, res) => {
   try {
@@ -281,14 +304,11 @@ export const sellerOnboarding = async (req, res) => {
     });
 
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: "Seller onboarding failed",
-      error: error.message,
-    });
+    console.error("SELLER ONBOARDING ERROR:", error);
+    return res.status(500).json({ success: false, message: "Seller onboarding failed" });
   }
 };
+
 
 export const getSellerStats = async (req, res) => {
   try {
@@ -376,9 +396,10 @@ export const getSellerStats = async (req, res) => {
     });
   } catch (error) {
     console.error("GET SELLER STATS ERROR:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: "Failed to get seller stats" });
   }
 };
+
 
 export const getSellerDashboardData = async (req, res) => {
   try {
@@ -433,10 +454,11 @@ export const getSellerDashboardData = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Dashboard Data Error:", error.message);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("DASHBOARD DATA ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get dashboard data" });
   }
 };
+
 
 export const getSellerOrders = async (req, res) => {
   try {
@@ -458,7 +480,8 @@ export const getSellerOrders = async (req, res) => {
 
     return res.status(200).json({ success: true, data: orders.rows });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("SELLER API ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -482,7 +505,8 @@ export const getSellerCustomers = async (req, res) => {
 
     return res.status(200).json({ success: true, data: customers.rows });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("SELLER API ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -508,9 +532,11 @@ export const getSellerProfile = async (req, res) => {
 
     return res.status(200).json({ success: true, data: seller.rows[0] });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("GET SELLER PROFILE ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get seller profile" });
   }
 };
+
 
 export const updateSellerProfile = async (req, res) => {
   try {
@@ -538,9 +564,11 @@ export const updateSellerProfile = async (req, res) => {
 
     return res.status(200).json({ success: true, message: 'Profile updated successfully' });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("UPDATE SELLER PROFILE ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update seller profile" });
   }
 };
+
 
 export const getSellerPayments = async (req, res) => {
   try {
@@ -583,7 +611,8 @@ export const getSellerPayments = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("SELLER API ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 export const getSellerFinanceAnalytics = async (req, res) => {
@@ -692,10 +721,11 @@ export const getSellerFinanceAnalytics = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Finance Analytics Error:", error.message);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("FINANCE ANALYTICS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get finance analytics" });
   }
 };
+
 
 /**
  * Populates or updates daily_finances from the orders table.
@@ -979,7 +1009,8 @@ export const getSellerNotifications = async (req, res) => {
 
     return res.status(200).json({ success: true, data: notifications.rows });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("SELLER API ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -1002,6 +1033,7 @@ export const markNotificationRead = async (req, res) => {
 
     return res.status(200).json({ success: true, message: 'Notification marked as read' });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("SELLER API ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };

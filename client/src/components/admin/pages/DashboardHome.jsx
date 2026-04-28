@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../../context/AuthContext";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -100,8 +101,9 @@ export default function DashboardHome() {
     </div>
   );
 
+  const { currentUser } = useAuth();
   const stats = dashboardData?.stats || {};
-  const admin = JSON.parse(localStorage.getItem("admin")) || { name: "Administrator" };
+  const admin = currentUser || { name: "Administrator" };
 
   return (
     <div className="space-y-10 pb-16 px-2 animate-in fade-in duration-1000">

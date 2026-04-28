@@ -10,9 +10,11 @@ export const getCustomerNotifications = async (req, res) => {
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching notifications", error: error.message });
+        console.error('FETCH NOTIFICATIONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching notifications" });
     }
 };
+
 
 // Mark a notification as read
 export const markAsRead = async (req, res) => {
@@ -24,9 +26,11 @@ export const markAsRead = async (req, res) => {
         );
         res.status(200).json({ success: true, message: "Notification marked as read" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error updating notification", error: error.message });
+        console.error('UPDATE NOTIFICATION ERROR:', error);
+        res.status(500).json({ success: false, message: "Error updating notification" });
     }
 };
+
 
 // Mark all notifications as read for a customer
 export const markAllAsRead = async (req, res) => {
@@ -38,9 +42,11 @@ export const markAllAsRead = async (req, res) => {
         );
         res.status(200).json({ success: true, message: "All notifications marked as read" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error updating notifications", error: error.message });
+        console.error('UPDATE ALL NOTIFICATIONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error updating notifications" });
     }
 };
+
 
 // Delete a notification
 export const deleteNotification = async (req, res) => {
@@ -52,6 +58,8 @@ export const deleteNotification = async (req, res) => {
         );
         res.status(200).json({ success: true, message: "Notification deleted" });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error deleting notification", error: error.message });
+        console.error('DELETE NOTIFICATION ERROR:', error);
+        res.status(500).json({ success: false, message: "Error deleting notification" });
     }
 };
+

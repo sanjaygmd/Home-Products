@@ -2,6 +2,10 @@ import { pool } from '../configs/db.js';
 
 export const getAdminSettings = async (req, res) => {
     const { adminId } = req.params;
+    if (req.user.type !== 'super_admin' && req.user.id !== adminId) {
+        return res.status(403).json({ success: false, message: "Unauthorized: You can only access your own settings." });
+    }
+
     try {
         const result = await pool.query(
             "SELECT key, value FROM admin_settings WHERE admin_id = $1 OR admin_id IS NULL",
@@ -16,14 +20,19 @@ export const getAdminSettings = async (req, res) => {
         
         res.status(200).json({ success: true, data: settings });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching settings", error: error.message });
+        console.error('GET SETTINGS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching settings" });
     }
 };
 
 export const updateAdminSettings = async (req, res) => {
     const { adminId } = req.params;
-    const { settings } = req.body; // Expecting an object like { "new_orders": true, "cod_enabled": false }
-    
+    const { settings } = req.body; 
+
+    if (req.user.type !== 'super_admin' && req.user.id !== adminId) {
+        return res.status(403).json({ success: false, message: "Unauthorized: You can only update your own settings." });
+    }
+
     try {
         const client = await pool.connect();
         try {
@@ -48,12 +57,18 @@ export const updateAdminSettings = async (req, res) => {
             client.release();
         }
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error updating settings", error: error.message });
+        console.error('UPDATE SETTINGS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error updating settings" });
     }
 };
 
+
 export const getAdminNotifications = async (req, res) => {
     const { adminId } = req.params;
+    if (req.user.type !== 'super_admin' && req.user.id !== adminId) {
+        return res.status(403).json({ success: false, message: "Unauthorized: You can only access your own notifications." });
+    }
+
     try {
         const result = await pool.query(
             "SELECT * FROM notifications WHERE admin_id = $1 OR admin_id IS NULL ORDER BY created_at DESC LIMIT 50",
@@ -61,6 +76,7 @@ export const getAdminNotifications = async (req, res) => {
         );
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Error fetching notifications", error: error.message });
+        console.error('GET NOTIFICATIONS ERROR:', error);
+        res.status(500).json({ success: false, message: "Error fetching notifications" });
     }
 };

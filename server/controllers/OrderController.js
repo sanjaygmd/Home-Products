@@ -30,9 +30,9 @@ export const createOrder = async (req, res) => {
       }
 
       const secret = process.env.RAZORPAY_KEY_SECRET;
-      if (!secret) {
-        console.error("RAZORPAY_KEY_SECRET NOT SET IN .ENV");
-        return res.status(500).json({ success: false, message: "Payment gateway configuration error" });
+      if (!secret || secret === 'your_razorpay_secret_here') {
+        console.error("CRITICAL: RAZORPAY_KEY_SECRET NOT CONFIGURED OR USING PLACEHOLDER");
+        return res.status(500).json({ success: false, message: "Payment gateway configuration error. Please contact administrator." });
       }
 
       const generated_signature = crypto
@@ -86,30 +86,83 @@ export const createOrder = async (req, res) => {
     );
     const order_id = orderRes.rows[0].order_id;
 
-    // Update coupon usage count if applicable
+    // Update coupon usage count if applicable (Atomic check and update)
     if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
       try {
-        await client.query(
-          "UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1",
+        const couponCheck = await client.query(
+          "SELECT max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
           [coupon_id]
         );
 
-        // Record detailed usage history
-        await client.query(
-          "INSERT INTO coupon_usage (usage_id, coupon_id, customer_id, order_id, used_at) VALUES (gen_random_uuid(), $1, $2, $3, NOW())",
-          [coupon_id, customer_id, order_id]
-        );
+        if (couponCheck.rows.length > 0) {
+          const { max_usage, used_count } = couponCheck.rows[0];
+          
+          // Check if customer already used this coupon
+          const customerUsage = await client.query(
+            "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
+            [coupon_id, customer_id]
+          );
+          if (customerUsage.rows.length > 0) {
+            throw new Error("You have already used this coupon");
+          }
+
+          if (max_usage && used_count >= max_usage) {
+            throw new Error("Coupon usage limit reached");
+          }
+
+          await client.query(
+            "UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1",
+            [coupon_id]
+          );
+
+          await client.query(
+            "INSERT INTO coupon_usage (usage_id, coupon_id, customer_id, order_id, used_at) VALUES (gen_random_uuid(), $1, $2, $3, NOW())",
+            [coupon_id, customer_id, order_id]
+          );
+        }
       } catch (couponError) {
-        console.error("[ORDER] Failed to update coupon usage:", couponError.message);
+        await client.query('ROLLBACK');
+        console.error("[ORDER] Coupon Error:", couponError.message);
+        return res.status(400).json({ success: false, message: couponError.message || "Failed to process coupon" });
       }
     }
 
     // 3. Insert into order_items, update stock, and track seller totals
     const commissionRate = 0.10; // Default 10%
+    const sellerSubtotals = {};
 
     for (const item of items) {
+      const qty = parseInt(item.quantity) || 1;
+      const rawVId = item.variant_id || item.variantId;
+      const vId = (rawVId && rawVId !== 'null' && rawVId !== '') ? rawVId : null;
 
-      // a. Insert order item
+      // ATOMIC STOCK CHECK AND UPDATE
+      if (vId) {
+        const vCheck = await client.query(
+          "SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE",
+          [vId]
+        );
+        if (vCheck.rows.length === 0 || vCheck.rows[0].stock_quantity < qty) {
+          throw new Error(`Insufficient stock for variant ${vId}`);
+        }
+        await client.query(
+          "UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2",
+          [qty, vId]
+        );
+      } else {
+        const pCheck = await client.query(
+          "SELECT stock_quantity FROM products WHERE product_id = $1 FOR UPDATE",
+          [item.product_id]
+        );
+        if (pCheck.rows.length === 0 || pCheck.rows[0].stock_quantity < qty) {
+          throw new Error(`Insufficient stock for product ${item.product_id}`);
+        }
+        await client.query(
+          "UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2",
+          [qty, item.product_id]
+        );
+      }
+
       const orderItemRes = await client.query(
         `INSERT INTO order_items (order_item_id, order_id, product_id, variant_id, seller_id, quantity, unit_price, total_price, item_status)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'Pending')
@@ -117,30 +170,6 @@ export const createOrder = async (req, res) => {
         [order_id, item.product_id, item.variant_id || null, item.seller_id, item.quantity, item.unit_price, item.unit_price * item.quantity]
       );
       const order_item_id = orderItemRes.rows[0].order_item_id;
-
-      // b. Update Stock
-      const qty = parseInt(item.quantity) || 1;
-      // Handle both variant_id and variantId (camelCase)
-      const rawVId = item.variant_id || item.variantId;
-      const vId = (rawVId && rawVId !== 'null' && rawVId !== '') ? rawVId : null;
-
-      if (vId) {
-        const vUpdate = await client.query(
-          `UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2 RETURNING stock_quantity`,
-          [qty, vId]
-        );
-        if (vUpdate.rowCount === 0) {
-          console.error(`ERROR: Variant ID ${vId} NOT FOUND in product_variants table.`);
-        }
-      } else {
-        const pUpdate = await client.query(
-          `UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2 RETURNING stock_quantity`,
-          [qty, item.product_id]
-        );
-        if (pUpdate.rowCount === 0) {
-          console.error(`ERROR: Product ID ${item.product_id} NOT FOUND in products table.`);
-        }
-      }
 
       // c. Get Seller ID (Lookup if missing)
       let itemSellerId = item.seller_id;
@@ -236,15 +265,14 @@ export const createOrder = async (req, res) => {
     );
 
     await client.query('COMMIT');
+    console.log(`[ORDER] === TRANSACTION COMMITTED FOR ORDER: ${order_id} ===`);
 
-    // 9. Sync with Shiprocket (Background/Async)
-    try {
-        await pushOrderToShiprocket(order_id);
-    } catch (srError) {
-        console.error("Shiprocket Auto-Sync Error:", srError.message);
-        // We don't fail the order if Shiprocket fails, but we log it.
-    }
+    // 9. Sync with Shiprocket (Background/Non-blocking to prevent UI timeout)
+    pushOrderToShiprocket(order_id).catch(srError => {
+        console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
+    });
 
+    console.log(`[ORDER] Sending 201 response for order: ${order_id}`);
     res.status(201).json({
       success: true,
       message: "Order placed successfully",
@@ -253,8 +281,8 @@ export const createOrder = async (req, res) => {
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("Order creation error:", error);
-    res.status(500).json({ success: false, message: "Failed to place order", error: error.message });
+    console.error(`[ORDER FATAL ERROR]`, error);
+    res.status(500).json({ success: false, message: error.message || "Failed to place order" });
   } finally {
     client.release();
   }
@@ -273,9 +301,11 @@ export const getMyOrders = async (req, res) => {
     );
     res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch orders", error: error.message });
+    console.error("FETCH ORDERS ERROR:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch orders" });
   }
 }
+
 
 export const getOrderById = async (req, res) => {
   try {
@@ -351,8 +381,10 @@ export const getOrderById = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch order details", error: error.message });
+    console.error("FETCH ORDER DETAILS ERROR:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch order details" });
   }
+
 
 }
 
@@ -505,8 +537,9 @@ export const updateOrderStatus = async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("UPDATE ORDER STATUS ERROR:", error);
-    res.status(500).json({ success: false, message: "Failed to update order status", error: error.message });
+    res.status(500).json({ success: false, message: "Failed to update order status" });
   } finally {
+
     client.release();
   }
 };
@@ -580,8 +613,9 @@ export const createReturnRequest = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("CREATE RETURN REQUEST ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to submit return request.", error: error.message });
+        res.status(500).json({ success: false, message: "Failed to submit return request." });
     } finally {
+
         client.release();
     }
 };

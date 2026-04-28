@@ -1,5 +1,17 @@
 import { pool } from "../../configs/db.js";
-import { createAuthSession, invalidateSession } from "../../utils/authSession.js";
+import fs from 'fs';
+import path from 'path';
+
+const debugLog = (msg, data) => {
+    try {
+        const logPath = path.join(process.cwd(), 'debug_api.log');
+        const entry = `[${new Date().toISOString()}] ${msg}: ${JSON.stringify(data, null, 2)}\n`;
+        fs.appendFileSync(logPath, entry);
+        fs.appendFileSync(path.join(process.cwd(), 'debug_login.log'), entry);
+    } catch (e) {}
+};
+
+import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 import { logAudit } from "../../utils/auditLogger.js";
 import { processAutoPayout } from "../PayoutController.js";
 import { pushOrderToShiprocket, createShiprocketReturn } from "../ShipmentController.js";
@@ -15,6 +27,11 @@ export const registerAdmin = async (req, res) => {
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
+
+    if (password.length < 8) {
+      return res.status(400).json({ success: false, message: "Password must be at least 8 characters long" });
+    }
+
 
     const table = type === 'super_admin' ? 'super_admins' : 'admins';
     const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
@@ -63,6 +80,8 @@ export const registerAdmin = async (req, res) => {
       is_super_admin: type === 'super_admin'
     });
 
+    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+
     return res.status(201).json({
       success: true,
       message: `${type} account initialized successfully`,
@@ -76,6 +95,7 @@ export const registerAdmin = async (req, res) => {
       }
     });
 
+
   } catch (error) {
     console.error("ADMIN REGISTER ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to initialize admin account" });
@@ -85,6 +105,7 @@ export const registerAdmin = async (req, res) => {
 export const loginAdmin = async (req, res) => {
   try {
     const { email, password, type = 'admin' } = req.body;
+    debugLog("Login attempt", { email, type });
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
@@ -113,15 +134,15 @@ export const loginAdmin = async (req, res) => {
     if (type === 'super_admin') {
       // 2FA required for Super Admin
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      
+
       superAdminLoginOtps.set(user.email, {
         otp,
         expires: Date.now() + 5 * 60 * 1000,
         user: { ...user, userId }
       });
-      
+
       await sendSuperAdminLoginOTP(user.email, user.name, otp);
-      
+
       return res.status(200).json({
         success: true,
         requires2FA: true,
@@ -146,6 +167,10 @@ export const loginAdmin = async (req, res) => {
       is_super_admin: type === 'super_admin'
     });
 
+    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+
+    debugLog("Login success", { userId, type, token: session.token.substring(0, 8) + "..." });
+
     return res.status(200).json({
       success: true,
       message: `${type} login successful`,
@@ -159,6 +184,7 @@ export const loginAdmin = async (req, res) => {
       }
     });
 
+
   } catch (error) {
     console.error("ADMIN LOGIN ERROR:", error);
     return res.status(500).json({ success: false, message: "Internal server error during login" });
@@ -171,29 +197,29 @@ export const loginAdmin = async (req, res) => {
 export const verifySuperAdminLogin = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    
+
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required" });
     }
 
     const loginData = superAdminLoginOtps.get(email);
-    
+
     if (!loginData) {
       return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
     }
-    
+
     if (Date.now() > loginData.expires) {
       superAdminLoginOtps.delete(email);
       return res.status(400).json({ success: false, message: "Verification code has expired" });
     }
-    
+
     if (loginData.otp !== otp) {
       return res.status(400).json({ success: false, message: "Invalid verification code" });
     }
 
     const user = loginData.user;
     const userId = user.userId;
-    
+
     await pool.query(`UPDATE super_admins SET last_login_at = NOW() WHERE super_admin_id = $1`, [userId]);
 
 
@@ -212,6 +238,8 @@ export const verifySuperAdminLogin = async (req, res) => {
 
     superAdminLoginOtps.delete(email);
 
+    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+
     return res.status(200).json({
       success: true,
       message: "Super Admin login successful",
@@ -225,6 +253,7 @@ export const verifySuperAdminLogin = async (req, res) => {
       }
     });
 
+
   } catch (error) {
     console.error("VERIFY SUPER ADMIN LOGIN ERROR:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
@@ -237,11 +266,16 @@ export const logoutAdmin = async (req, res) => {
     if (sessionId) {
       await invalidateSession(sessionId);
     }
+    res.clearCookie('token', { path: '/' });
+    res.clearCookie('admin_token', { path: '/' });
+    res.clearCookie('seller_token', { path: '/' });
+    res.clearCookie('customer_token', { path: '/' });
     return res.status(200).json({ success: true, message: "Admin logged out" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Logout failed" });
   }
 };
+
 
 /**
  * Request Password Reset (Admin)
@@ -276,7 +310,7 @@ export const requestAdminPasswordReset = async (req, res) => {
 
     // Generate a 6-digit numeric OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     // Store in memory with 15 minute expiration
     resetOtps.set(email, {
       otp,
@@ -302,26 +336,27 @@ export const requestAdminPasswordReset = async (req, res) => {
 export const verifyAdminPasswordReset = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    
+
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ success: false, message: "Email, OTP, and new password are required" });
     }
-    
-    if (newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
+
     const resetData = resetOtps.get(email);
-    
+
     if (!resetData) {
       return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
     }
-    
+
     if (Date.now() > resetData.expires) {
       resetOtps.delete(email);
       return res.status(400).json({ success: false, message: "Verification code has expired" });
     }
-    
+
     if (resetData.otp !== otp) {
       return res.status(400).json({ success: false, message: "Invalid verification code" });
     }
@@ -362,6 +397,7 @@ export const getAdminDashboardData = async (req, res) => {
     `;
     const statsResult = await pool.query(statsQuery);
     const stats = statsResult.rows[0];
+    debugLog("Dashboard Stats Result", stats);
 
     // 2. Revenue Trend (Last 6 Months)
     const trendQuery = `
@@ -432,41 +468,44 @@ export const getAdminDashboardData = async (req, res) => {
     `;
     const performanceResult = await pool.query(performanceQuery);
 
+    const dashboardData = {
+      stats: {
+        total_orders: Number(stats.total_orders),
+        total_products: Number(stats.total_products),
+        total_customers: Number(stats.total_customers),
+        total_revenue: Number(stats.total_revenue),
+        today_orders: Number(stats.today_orders),
+        today_revenue: Number(stats.today_revenue),
+        today_new_products: Number(stats.today_new_products),
+        today_new_customers: Number(stats.today_new_customers)
+      },
+      revenueTrend: trendResult.rows.map(r => ({
+        ...r,
+        revenue: Number(r.revenue),
+        profit: Number(r.profit),
+        orders: Number(r.orders)
+      })),
+      categoryDistribution: categoryResult.rows.map(r => ({
+        ...r,
+        value: Number(r.value)
+      })),
+      recentOrders: ordersResult.rows.map(o => ({
+        ...o,
+        total: `₹${Number(o.total || 0).toLocaleString('en-IN')}`,
+        time: o.time
+      })),
+      recentActivity: activityResult.rows,
+      productPerformance: performanceResult.rows.map((p, i) => ({
+        rank: i + 1,
+        ...p,
+        performance: Math.round((Number(p.rating) || 4.5) * 20)
+      }))
+    };
+
+    debugLog("Final Dashboard Data", dashboardData);
     return res.status(200).json({
       success: true,
-      data: {
-        stats: {
-          total_orders: Number(stats.total_orders),
-          total_products: Number(stats.total_products),
-          total_customers: Number(stats.total_customers),
-          total_revenue: Number(stats.total_revenue),
-          today_orders: Number(stats.today_orders),
-          today_revenue: Number(stats.today_revenue),
-          today_new_products: Number(stats.today_new_products),
-          today_new_customers: Number(stats.today_new_customers)
-        },
-        revenueTrend: trendResult.rows.map(r => ({
-          ...r,
-          revenue: Number(r.revenue),
-          profit: Number(r.profit),
-          orders: Number(r.orders)
-        })),
-        categoryDistribution: categoryResult.rows.map(r => ({
-          ...r,
-          value: Number(r.value)
-        })),
-        recentOrders: ordersResult.rows.map(o => ({
-          ...o,
-          total: `₹${Number(o.total || 0).toLocaleString('en-IN')}`,
-          time: o.time
-        })),
-        recentActivity: activityResult.rows,
-        productPerformance: performanceResult.rows.map((p, i) => ({
-          rank: i + 1,
-          ...p,
-          performance: Math.round((Number(p.rating) || 4.5) * 20)
-        }))
-      }
+      data: dashboardData
     });
 
   } catch (error) {
@@ -1182,7 +1221,7 @@ export const getAllOrders = async (req, res) => {
     `;
     const result = await pool.query(ordersQuery);
 
-    return res.status(200).json(result.rows || []);
+    return res.status(200).json({ success: true, data: result.rows || [] });
   } catch (error) {
     console.error("GET ALL ORDERS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch orders" });
@@ -1208,7 +1247,7 @@ export const getAllCustomers = async (req, res) => {
       ORDER BY created_at DESC
     `;
     const result = await pool.query(customersQuery);
-    return res.status(200).json(result.rows);
+    return res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
     console.error("GET ALL CUSTOMERS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch customers" });
@@ -1222,15 +1261,29 @@ export const toggleCustomerStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active, block_reason } = req.body;
   try {
-    const updateQuery = `UPDATE customers SET is_active = $1, block_reason = $2 WHERE customer_id = $3 RETURNING is_active, block_reason`;
+    const updateQuery = `
+      UPDATE customers 
+      SET is_active = $1, block_reason = $2, updated_at = NOW() 
+      WHERE customer_id = $3 AND is_active != $1
+      RETURNING is_active, block_reason`;
     const result = await pool.query(updateQuery, [is_active, is_active ? null : block_reason, id]);
 
     if (result.rowCount === 0) {
+      // Check if it failed because it was already in that state
+      const check = await pool.query("SELECT is_active FROM customers WHERE customer_id = $1", [id]);
+      if (check.rowCount > 0) {
+        return res.status(200).json({
+          success: true,
+          message: `Customer is already ${is_active ? 'active' : 'blocked'}`,
+          is_active: check.rows[0].is_active
+        });
+      }
       return res.status(404).json({ success: false, message: "Customer not found" });
     }
 
     return res.status(200).json({
       success: true,
+      message: `Customer ${is_active ? 'unblocked' : 'blocked'} successfully`,
       is_active: result.rows[0].is_active,
       block_reason: result.rows[0].block_reason
     });
@@ -1247,21 +1300,78 @@ export const toggleSellerStatus = async (req, res) => {
   const { id } = req.params;
   const { is_active, block_reason } = req.body;
   try {
-    const updateQuery = `UPDATE sellers SET is_active = $1, block_reason = $2 WHERE seller_id = $3 RETURNING is_active, block_reason`;
+    const updateQuery = `
+      UPDATE sellers 
+      SET is_active = $1, block_reason = $2, updated_at = NOW() 
+      WHERE seller_id = $3 AND is_active != $1
+      RETURNING is_active, block_reason`;
     const result = await pool.query(updateQuery, [is_active, is_active ? null : block_reason, id]);
 
     if (result.rowCount === 0) {
+      const check = await pool.query("SELECT is_active FROM sellers WHERE seller_id = $1", [id]);
+      if (check.rowCount > 0) {
+        return res.status(200).json({
+          success: true,
+          message: `Seller is already ${is_active ? 'active' : 'blocked'}`,
+          is_active: check.rows[0].is_active
+        });
+      }
       return res.status(404).json({ success: false, message: "Seller not found" });
     }
 
     return res.status(200).json({
       success: true,
+      message: `Seller ${is_active ? 'unblocked' : 'blocked'} successfully`,
       is_active: result.rows[0].is_active,
       block_reason: result.rows[0].block_reason
     });
   } catch (error) {
     console.error("TOGGLE SELLER STATUS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to update status" });
+  }
+};
+
+/**
+ * Super Admin: Delete Seller Account
+ * Performed within a transaction to ensure all dependencies are handled.
+ */
+export const deleteSeller = async (req, res) => {
+  const { id } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Check if seller exists
+    const checkRes = await client.query("SELECT seller_id, store_name FROM sellers WHERE seller_id = $1", [id]);
+    if (checkRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Seller account not found" });
+    }
+
+    const sellerName = checkRes.rows[0].store_name;
+
+    // 2. Perform explicit cleanup for non-cascading dependencies if any
+    // Note: Most are handled by the new database constraints (ON DELETE CASCADE/SET NULL)
+    
+    // 3. Final: Delete the seller record
+    await client.query("DELETE FROM sellers WHERE seller_id = $1", [id]);
+
+    // 4. Log the action in audit logs
+    await client.query(`
+      INSERT INTO audit_logs (audit_id, admin_id, table_name, record_id, action, new_values, created_at)
+      VALUES (gen_random_uuid(), $1, 'sellers', $2, 'DELETE_SELLER', $3, NOW())
+    `, [req.user.id, id, JSON.stringify({ store_name: sellerName })]);
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: "Seller account and associated data removed successfully" });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("DELETE SELLER ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete seller account. " + error.message });
+  } finally {
+    client.release();
   }
 };
 /**
@@ -1283,8 +1393,9 @@ export const getAdminProducts = async (req, res) => {
       ORDER BY p.created_at DESC
     `;
     const result = await pool.query(productsQuery);
+    console.log("DEBUG: getAdminProducts result count:", result.rows.length);
 
-    // Map to match frontend expectations if needed
+
     const products = result.rows.map(p => ({
       ...p,
       id: p.product_id,
@@ -1292,8 +1403,9 @@ export const getAdminProducts = async (req, res) => {
       stock: p.stock_quantity || 0,
       status: p.is_active ? "Active" : "Inactive"
     }));
+    debugLog("getAdminProducts result count", { count: products.length, sample: products[0] });
 
-    return res.status(200).json(products);
+    return res.status(200).json({ success: true, data: products });
   } catch (error) {
     console.error("GET ADMIN PRODUCTS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch admin products" });
@@ -1378,10 +1490,22 @@ export const updateAdminStatus = async (req, res) => {
     const { id } = req.params;
     const { is_active } = req.body;
 
-    await pool.query(
-      "UPDATE admins SET is_active = $1, updated_at = NOW() WHERE admin_id = $2",
+    const result = await pool.query(
+      "UPDATE admins SET is_active = $1, updated_at = NOW() WHERE admin_id = $2 AND is_active != $1",
       [is_active, id]
     );
+
+    if (result.rowCount === 0) {
+      const check = await pool.query("SELECT is_active FROM admins WHERE admin_id = $1", [id]);
+      if (check.rowCount > 0) {
+        return res.status(200).json({
+          success: true,
+          message: `Administrator is already ${is_active ? 'active' : 'blocked'}`,
+          is_active: check.rows[0].is_active
+        });
+      }
+      return res.status(404).json({ success: false, message: "Administrator not found" });
+    }
 
     await logAudit({
       admin_id: req.user.id,
@@ -1454,6 +1578,17 @@ export const bulkUpdateOrders = async (req, res) => {
 
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return res.status(400).json({ success: false, message: "No orders selected" });
+    }
+
+    // Security: Validation for status and courier
+    const allowedStatuses = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
+    const allowedCouriers = ['Delhivery', 'BlueDart', 'Ecom Express', 'Shadowfax', 'Xpressbees', 'Shiprocket', 'Bulk Update', 'Other'];
+
+    if (status && !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid order status" });
+    }
+    if (courier && !allowedCouriers.includes(courier)) {
+      return res.status(400).json({ success: false, message: "Invalid courier name" });
     }
 
     let query = `UPDATE orders SET updated_at = NOW()`;
@@ -1742,14 +1877,14 @@ export const updateAdminPasswordSelf = async (req, res) => {
     const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
 
     const result = await pool.query(`SELECT password_hash, name, email FROM ${table} WHERE ${idCol} = $1`, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Account not found" });
     }
 
     const user = result.rows[0];
     const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [currentPassword, user.password_hash]);
-    
+
     if (!passwordMatch.rows[0].match) {
       return res.status(401).json({ success: false, message: "Invalid current password" });
     }

@@ -1,7 +1,7 @@
 import { pool } from "../../configs/db.js";
 import { generateOtp, hashOtp } from "../../utils/otp.js";
 import { sendEmailOtp } from "../../utils/email.js";
-import { createAuthSession, invalidateSession } from "../../utils/authSession.js";
+import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 
 export const loginCustomer = async (req, res) => {
   try {
@@ -19,8 +19,8 @@ export const loginCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email format" });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    if (password.length < 8) {
+      return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
     const existingUser = await pool.query("SELECT * FROM customers WHERE email = $1", [email])
@@ -54,6 +54,8 @@ export const loginCustomer = async (req, res) => {
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(user.customer_id, 'customer', ip, device);
 
+    setSessionCookie(res, 'customer', session.token);
+
     return res.status(200).json({
       success: true,
       message: 'Logging in customer successful',
@@ -69,14 +71,16 @@ export const loginCustomer = async (req, res) => {
     })
 
 
+
   } catch (error) {
+    console.error("CUSTOMER LOGIN ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: 'Customer login failed',
-      error: error.message
+      message: 'Customer login failed'
     })
   }
 }
+
 
 export const registerCustomer = async (req, res) => {
   try {
@@ -103,10 +107,10 @@ export const registerCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Phone number must be 10 digits" });
     }
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters",
+        message: "Password must be at least 8 characters",
       });
     }
 
@@ -131,6 +135,13 @@ export const registerCustomer = async (req, res) => {
       [full_name, email, phone, password, date_of_birth || null, gender || null, profile_picture_url || null]
     );
 
+    // Create Auth Session automatically on register
+    const ip = req.ip || req.connection.remoteAddress;
+    const device = { agent: req.get('User-Agent') };
+    const session = await createAuthSession(result.rows[0].customer_id, 'customer', ip, device);
+
+    setSessionCookie(res, 'customer', session.token);
+
     return res.status(201).json({
       success: true,
       message: "Customer registered successfully",
@@ -139,9 +150,12 @@ export const registerCustomer = async (req, res) => {
         name: result.rows[0].full_name,
         email: result.rows[0].email,
         phone: result.rows[0].phone,
-        profile_picture_url: result.rows[0].profile_picture_url
+        profile_picture_url: result.rows[0].profile_picture_url,
+        sessionId: session.sessionId,
+        token: session.token
       },
     });
+
 
   } catch (error) {
     console.error(error);
@@ -255,13 +269,11 @@ export const getCustomerById = async (req, res) => {
       data: user.rows[0]
     })
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to get customer by id',
-      error: error.message
-    })
+    console.error("GET CUSTOMER BY ID ERROR:", error);
+    return res.status(500).json({ success: false, message: 'Failed to get customer by id' });
   }
 }
+
 
 export const updateCustomer = async (req, res) => {
   try {
@@ -301,14 +313,14 @@ export const updateCustomer = async (req, res) => {
       data: result.rows[0],
     });
   } catch (error) {
-    console.error(error);
+    console.error("UPDATE CUSTOMER ERROR:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to update customer",
-      error: error.message,
     });
   }
 };
+
 
 export const getCustomerStats = async (req, res) => {
   try {
@@ -332,10 +344,11 @@ export const getCustomerStats = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: "Failed to get customer stats", error: error.message });
+    console.error("GET CUSTOMER STATS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get customer stats" });
   }
 };
+
 
 export const getCustomerOrders = async (req, res) => {
   try {
@@ -356,10 +369,11 @@ export const getCustomerOrders = async (req, res) => {
       data: result.rows
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: "Failed to get customer orders", error: error.message });
+    console.error("GET CUSTOMER ORDERS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get customer orders" });
   }
 };
+
 
 export const getCustomerAddresses = async (req, res) => {
   try {
@@ -380,10 +394,11 @@ export const getCustomerAddresses = async (req, res) => {
       data: result.rows
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: "Failed to get customer addresses", error: error.message });
+    console.error("GET CUSTOMER ADDRESSES ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to get customer addresses" });
   }
 };
+
 
 
 export const logoutCustomer = async (req, res) => {
@@ -392,15 +407,20 @@ export const logoutCustomer = async (req, res) => {
     if (sessionId) {
       await invalidateSession(sessionId);
     }
+    res.clearCookie('token', { path: '/' });
+    res.clearCookie('admin_token', { path: '/' });
+    res.clearCookie('seller_token', { path: '/' });
+    res.clearCookie('customer_token', { path: '/' });
     return res.status(200).json({ success: true, message: "Logout successful" });
   } catch (error) {
+    console.error("LOGOUT ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: 'Customer logout failed',
-      error: error.message
+      message: 'Customer logout failed'
     })
   }
 }
+
 
 export const sendOTP = async (req, res) => {
   try {

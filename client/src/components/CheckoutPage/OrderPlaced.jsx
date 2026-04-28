@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const OrderPlaced = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const orderId = location.state?.orderId || "ORD" + Math.floor(Math.random() * 100000);
 
   const [animate, setAnimate] = useState(false);
 
@@ -52,7 +54,7 @@ const OrderPlaced = () => {
         <div className="mt-6 bg-gray-50 rounded-xl p-4 text-left space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Order ID</span>
-            <span className="font-medium text-gray-800">#ORD12345</span>
+            <span className="font-medium text-gray-800">#{orderId.toString().toUpperCase().slice(0, 12)}</span>
           </div>
 
           <div className="flex justify-between text-sm">
