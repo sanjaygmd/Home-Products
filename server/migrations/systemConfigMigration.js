@@ -2,7 +2,7 @@ import { pool } from '../configs/db.js';
 
 export const runMigration = async () => {
   try {
-    console.log("Running Super Admin Schema Update...");
+
     
     // 1. Drop system_config if it exists (as requested)
     await pool.query(`DROP TABLE IF EXISTS system_config`);
@@ -26,7 +26,7 @@ export const runMigration = async () => {
       ALTER TABLE super_admins ALTER COLUMN master_key SET DEFAULT '${masterKey}'
     `);
 
-    console.log("Super Admin Schema Update Completed.");
+
   } catch (error) {
     console.error("Migration Failed:", error);
   }

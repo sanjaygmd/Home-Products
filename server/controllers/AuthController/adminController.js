@@ -2,14 +2,7 @@ import { pool } from "../../configs/db.js";
 import fs from 'fs';
 import path from 'path';
 
-const debugLog = (msg, data) => {
-    try {
-        const logPath = path.join(process.cwd(), 'debug_api.log');
-        const entry = `[${new Date().toISOString()}] ${msg}: ${JSON.stringify(data, null, 2)}\n`;
-        fs.appendFileSync(logPath, entry);
-        fs.appendFileSync(path.join(process.cwd(), 'debug_login.log'), entry);
-    } catch (e) {}
-};
+
 
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 import { logAudit } from "../../utils/auditLogger.js";
@@ -105,7 +98,7 @@ export const registerAdmin = async (req, res) => {
 export const loginAdmin = async (req, res) => {
   try {
     const { email, password, type = 'admin' } = req.body;
-    debugLog("Login attempt", { email, type });
+
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
@@ -169,7 +162,7 @@ export const loginAdmin = async (req, res) => {
 
     setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
 
-    debugLog("Login success", { userId, type, token: session.token.substring(0, 8) + "..." });
+
 
     return res.status(200).json({
       success: true,
@@ -397,7 +390,7 @@ export const getAdminDashboardData = async (req, res) => {
     `;
     const statsResult = await pool.query(statsQuery);
     const stats = statsResult.rows[0];
-    debugLog("Dashboard Stats Result", stats);
+
 
     // 2. Revenue Trend (Last 6 Months)
     const trendQuery = `
@@ -502,7 +495,7 @@ export const getAdminDashboardData = async (req, res) => {
       }))
     };
 
-    debugLog("Final Dashboard Data", dashboardData);
+
     return res.status(200).json({
       success: true,
       data: dashboardData
@@ -1393,7 +1386,7 @@ export const getAdminProducts = async (req, res) => {
       ORDER BY p.created_at DESC
     `;
     const result = await pool.query(productsQuery);
-    console.log("DEBUG: getAdminProducts result count:", result.rows.length);
+
 
 
     const products = result.rows.map(p => ({
@@ -1403,7 +1396,7 @@ export const getAdminProducts = async (req, res) => {
       stock: p.stock_quantity || 0,
       status: p.is_active ? "Active" : "Inactive"
     }));
-    debugLog("getAdminProducts result count", { count: products.length, sample: products[0] });
+
 
     return res.status(200).json({ success: true, data: products });
   } catch (error) {

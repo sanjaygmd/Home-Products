@@ -30,7 +30,7 @@ const KYCPage = ({ back, data, setData }) => {
     navigate("/seller");
 
   } catch (err) {
-    console.log(err.response?.data?.message);
+
     setError(err.response?.data?.message || "Failed to submit KYC data");
   }
 };

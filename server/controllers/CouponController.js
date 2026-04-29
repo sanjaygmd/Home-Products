@@ -94,7 +94,7 @@ export const getAllCoupons = async (req, res) => {
 // Create a new coupon
 export const createCoupon = async (req, res) => {
     const { code, type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
-    console.log("Creating coupon with admin_id:", admin_id);
+
     try {
         const result = await pool.query(
             `INSERT INTO coupons (coupon_id, code, type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)

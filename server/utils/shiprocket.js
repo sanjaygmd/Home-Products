@@ -40,7 +40,7 @@ export const getAuthToken = async () => {
     // Set expiry to 9 days from now
     tokenExpiry = Date.now() + 9 * 24 * 60 * 60 * 1000;
     
-    console.log('✅ Shiprocket Authentication Successful');
+
     return authToken;
   } catch (error) {
     console.error('Shiprocket Auth Exception:', error.message);
@@ -74,7 +74,7 @@ export const addShiprocketPickupLocation = async (details) => {
         pin_code: details.pincode
     };
 
-    console.log(`[SHIPROCKET] Registering Pickup: ${details.location_name} at ${sanitizedAddress}`);
+
 
     const response = await fetch(`${BASE_URL}/settings/company/addpickup`, {
       method: 'POST',

@@ -23,7 +23,7 @@ import { sendOrderStatusNotifications } from '../utils/notifications.js';
  */
 export const pushOrderToShiprocket = async (orderId, client = pool) => {
     try {
-        console.log(`\n[SHIPROCKET] === STARTING DISPATCH FOR ORDER: ${orderId} ===`);
+
         
         // 1. Fetch Order Details with Customer Address
         const orderRes = await client.query(`
@@ -69,21 +69,29 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
         }
 
         const pickupLocation = pickupRes.rows[0];
-        console.log(`[SHIPROCKET] Pickup location: ${pickupLocation.location_name}`);
+
 
         // 4. Prepare Shiprocket Payload
-        const nameParts = (order.full_name || "Customer").trim().split(/\s+/);
+        const nameParts = (order.full_name || "Customer User").trim().split(/\s+/);
         const firstName = nameParts[0] || "Customer";
         const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
+        
+        // Ensure phone is exactly 10 digits
         let cleanedPhone = order.phone ? order.phone.replace(/\D/g, '') : '';
         if (cleanedPhone.length > 10 && cleanedPhone.startsWith('91')) {
             cleanedPhone = cleanedPhone.substring(cleanedPhone.length - 10);
         }
         const validPhone = cleanedPhone.length >= 10 ? cleanedPhone.substring(0, 10) : "9876543210";
         
+        // [ADDRESS FIX] Customer address must also be 10+ chars for Shiprocket
+        let customerAddress = (order.address_line_1 || '').trim();
+        if (customerAddress.length < 10) {
+            customerAddress = `House/Plot No. 1, ${customerAddress}`;
+        }
+
         const srOrderItems = items.map(item => ({
-            name: item.product_name,
-            sku: item.sku || (item.product_id ? item.product_id.slice(0, 8) : "PROD"),
+            name: item.product_name || "Product",
+            sku: (item.sku || (item.product_id ? item.product_id.slice(0, 8) : "PROD")).toString().slice(0, 30).replace(/[^a-zA-Z0-9_-]/g, ''),
             units: item.quantity,
             selling_price: Number(item.unit_price)
         }));
@@ -104,7 +112,7 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
             pickup_location: pickupLocation.location_name,
             billing_customer_name: firstName,
             billing_last_name: lastName,
-            billing_address: order.address_line_1,
+            billing_address: customerAddress,
             billing_city: order.city,
             billing_pincode: order.pincode,
             billing_state: order.state,
@@ -124,21 +132,21 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
         };
 
         // 5. STEP 1: Create Order in Shiprocket
-        console.log(`[SHIPROCKET] Calling createShiprocketOrder...`);
+
         let srOrderRes = await createShiprocketOrder(srPayload);
 
         // [FIX] Auto-Sync: If pickup location is missing, register it and retry
         if (srOrderRes && srOrderRes.message && srOrderRes.message.toLowerCase().includes('pickup location')) {
-            console.log(`[SHIPROCKET AUTO-SYNC] Detected pickup location error for "${pickupLocation.location_name}".`);
+
             
             try {
                 const syncRes = await addShiprocketPickupLocation(pickupLocation);
-                console.log(`[SHIPROCKET AUTO-SYNC] Registration response:`, JSON.stringify(syncRes));
+
 
                 if (syncRes && (syncRes.success || syncRes.status_code === 200)) {
-                    console.log(`[SHIPROCKET AUTO-SYNC] Successfully registered ${pickupLocation.location_name}. Waiting 1.5s for propagation...`);
+
                     await new Promise(resolve => setTimeout(resolve, 1500));
-                    console.log(`[SHIPROCKET AUTO-SYNC] Retrying order creation...`);
+
                     srOrderRes = await createShiprocketOrder(srPayload);
                 } else {
                     console.warn(`[SHIPROCKET AUTO-SYNC] Failed to register pickup location:`, syncRes?.message || 'Unknown error');
@@ -153,7 +161,7 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
             throw new Error(srOrderRes.message || "Shiprocket: Failed to create order.");
         }
 
-        console.log(`[SHIPROCKET] Order created successfully. SR_ID: ${srOrderRes.order_id}`);
+
         const srOrderId = srOrderRes.order_id;
         const shipmentId = srOrderRes.shipment_id;
 
@@ -206,7 +214,7 @@ export const pushOrderToShiprocket = async (orderId, client = pool) => {
                 updated_at = NOW()
         `, [srOrderId.toString(), order.order_id, shipmentId.toString(), awbCode, courierName]);
 
-        console.log(`[SHIPROCKET] === DISPATCH COMPLETED FOR ORDER: ${orderId} ===`);
+
         return { 
             sr_order_id: srOrderId, 
             shipment_id: shipmentId, 
@@ -239,7 +247,7 @@ export const initiateShipment = async (req, res) => {
         await sendOrderStatusNotifications(orderId, 'Processing', client);
 
         await client.query('COMMIT');
-        console.log(`[SHIPROCKET LOG] SUCCESS: Order ${orderId} successfully dispatched!`);
+
         return res.status(200).json({ success: true, message: "Shipment initiated", data: srResponse });
     } catch (error) {
         await client.query('ROLLBACK');
@@ -259,7 +267,7 @@ export const cancelShipment = async (orderId, client = pool) => {
         const srOrderRes = await client.query("SELECT sr_order_id, shipment_id FROM shiprocket_orders WHERE order_id = $1", [orderId]);
         
         if (srOrderRes.rows.length === 0) {
-            console.log("No Shiprocket record found for order cancellation, skipping SR API call.");
+
             return;
         }
 
@@ -272,7 +280,7 @@ export const cancelShipment = async (orderId, client = pool) => {
 
         if (srResponse.status_code === 200) {
             await client.query("UPDATE shiprocket_orders SET sr_status = 'CANCELLED', updated_at = NOW() WHERE order_id = $1", [orderId]);
-            console.log(`Shiprocket order ${shipment_id} cancelled successfully.`);
+
         } else {
             console.warn(`Shiprocket Cancellation Warning: ${srResponse.message}`);
         }

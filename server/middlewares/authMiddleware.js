@@ -3,13 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { pool } from '../configs/db.js';
 
-const debugLog = (msg, data) => {
-    try {
-        const logPath = path.join(process.cwd(), 'debug_auth.log');
-        const entry = `[${new Date().toISOString()}] ${msg}: ${JSON.stringify(data, null, 2)}\n`;
-        fs.appendFileSync(logPath, entry);
-    } catch (e) {}
-};
+
 
 /**
  * Middleware to verify session token and check roles
@@ -49,15 +43,10 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
         // Filter out duplicates and nulls
         const uniqueTokens = [...new Set(tokens)].filter(Boolean);
 
-        debugLog("Auth attempt", { 
-            hasHeader: !!authHeader, 
-            cookieNames: req.cookies ? Object.keys(req.cookies) : [], 
-            uniqueTokensFound: uniqueTokens.length,
-            allowedRoles 
-        });
+
 
         if (uniqueTokens.length === 0) {
-            debugLog("Auth failed: No token found");
+
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
 
@@ -83,7 +72,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
         `, [tokenHashes]);
 
         if (result.rows.length === 0) {
-            debugLog("Auth failed: No valid sessions found for tokens");
+
             return res.status(401).json({ success: false, message: 'Invalid or expired session' });
         }
 
@@ -105,11 +94,11 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
             name: session.name
         };
 
-        debugLog("Auth successful session found", { user });
+
 
         // 4. Role Check
         if (allowedRoles.length > 0 && !allowedRoles.includes(user.type)) {
-            debugLog("Auth failed: Insufficient permissions", { userType: user.type, allowedRoles });
+
             return res.status(403).json({ 
                 success: false, 
                 message: 'Insufficient permissions',
@@ -122,7 +111,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
         next();
     } catch (error) {
         console.error("AUTH MIDDLEWARE ERROR:", error);
-        debugLog("AUTH MIDDLEWARE ERROR", error.message);
+
         return res.status(500).json({ success: false, message: 'Authentication error' });
     }
 };

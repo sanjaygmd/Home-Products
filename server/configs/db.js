@@ -12,7 +12,7 @@ export const pool = new Pool({
 export const testDB = async () => {
   try {
     await pool.query("SELECT NOW()");
-    console.log("DB Connected");
+
     
     // Ensure Shiprocket tracking table exists
     await pool.query(`
@@ -29,7 +29,7 @@ export const testDB = async () => {
         );
     `);
     
-    console.log("✅ Shiprocket tracking table ready");
+
     
   } catch (err) {
     console.error("DB Error:", err.message);

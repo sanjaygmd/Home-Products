@@ -217,7 +217,7 @@ export const updatePayoutStatus = async (req, res) => {
                 WHERE payout_id = $1::uuid
             `, [payout_id]);
 
-            console.log(`Updated ${commissionUpdate.rowCount} commissions to 'paid' for payout ${payout_id}`);
+
 
             // Log the finance transaction
             await client.query(`

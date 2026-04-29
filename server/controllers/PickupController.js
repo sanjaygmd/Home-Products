@@ -68,7 +68,7 @@ export const addPickupLocation = async (req, res) => {
                         "UPDATE seller_pickup_location SET shipment_location_id = $1 WHERE pickup_id = $2",
                         [addressId.toString(), newLocation.pickup_id]
                     );
-                    console.log(`[SHIPROCKET] Pickup location registered: ${addressId}`);
+
                 }
             } else {
                 console.warn('[SHIPROCKET] Pickup Sync Warning:', srResponse.message || 'Unknown error');
@@ -141,7 +141,7 @@ export const updatePickupLocation = async (req, res) => {
         // Sync with Shiprocket
         try {
             await addShiprocketPickupLocation(updatedLocation);
-            console.log(`[SHIPROCKET] Pickup location updated/re-registered: ${updatedLocation.location_name}`);
+
         } catch (srError) {
             console.error('[SHIPROCKET] Update Sync Exception:', srError.message);
         }

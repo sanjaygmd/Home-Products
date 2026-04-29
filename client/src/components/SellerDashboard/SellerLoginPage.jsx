@@ -63,7 +63,7 @@ const SellerLoginPage = () => {
       navigate("/seller");
 
     } catch (err) {
-      console.log(err);
+
     } finally {
       setLoading(false);
     }

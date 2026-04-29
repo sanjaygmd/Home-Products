@@ -2,7 +2,7 @@ import { pool } from '../configs/db.js';
 
 export const fixSellerConstraints = async () => {
   try {
-    console.log("Updating Seller Foreign Key Constraints...");
+
 
     const queries = [
       // 1. seller_payouts
@@ -73,7 +73,7 @@ export const fixSellerConstraints = async () => {
       await pool.query(query);
     }
 
-    console.log("Seller Foreign Key Constraints Updated Successfully.");
+
   } catch (error) {
     console.error("Migration Failed (Seller Constraints):", error);
   }

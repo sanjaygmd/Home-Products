@@ -125,5 +125,5 @@ testDB()
     .then(() => fixSellerConstraints())
     .then(() => pruneExpiredRecords()) // Run cleanup on startup
     .catch((err) => {
-        console.log('DB error: ', err)
+        console.error('DB error: ', err)
     })

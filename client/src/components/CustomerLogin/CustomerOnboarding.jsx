@@ -60,7 +60,7 @@ const CustomerOnboarding = () => {
       navigate("/");
 
     } catch (err) {
-      console.log(err);
+
       setError("Something went wrong");
     } finally {
       setLoading(false);

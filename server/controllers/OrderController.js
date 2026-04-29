@@ -265,14 +265,14 @@ export const createOrder = async (req, res) => {
     );
 
     await client.query('COMMIT');
-    console.log(`[ORDER] === TRANSACTION COMMITTED FOR ORDER: ${order_id} ===`);
+
 
     // 9. Sync with Shiprocket (Background/Non-blocking to prevent UI timeout)
     pushOrderToShiprocket(order_id).catch(srError => {
         console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
     });
 
-    console.log(`[ORDER] Sending 201 response for order: ${order_id}`);
+
     res.status(201).json({
       success: true,
       message: "Order placed successfully",

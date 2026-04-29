@@ -26,7 +26,7 @@ const SellerProducts = () => {
   let filteredProducts = sellerProducts.filter(p => {
     const pSellerId = String(p.seller_id || '').toLowerCase();
     const sId = String(sellerId || '').toLowerCase();
-    // console.log(`Comparing Product Seller ID: ${pSellerId} with Current Seller ID: ${sId}`);
+
     return pSellerId === sId;
   });
 
