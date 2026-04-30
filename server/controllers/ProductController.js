@@ -37,33 +37,35 @@ export const addProduct = async (req, res) => {
         try {
             await client.query('BEGIN');
 
-            const productResult = await client.query(
-                `INSERT INTO products 
-                (product_id, category_id, seller_id, name, description, sku, price, mrp, stock_quantity, weight, length, breadth, height, brand, images, slug, color, size, room, discount_percent) 
-                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) 
-                RETURNING *`,
-                [
-                    category_id,
-                    seller_id || null,
-                    name,
-                    description,
-                    sku,
-                    price,
-                    mrp,
-                    stock_quantity || 0,
-                    weight || 0,
-                    length || 0,
-                    breadth || 0,
-                    height || 0,
-                    brand,
-                    (images && images.length > 0) ? images.map(img => typeof img === 'string' ? img : img.url) : [],
-                    slug || name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
-                    color,
-                    size,
-                    room,
-                    discount_percent || 0
-                ]
-            );
+            const sellerIdToUse = req.user.type === 'seller' ? req.user.id : (seller_id || null);
+
+        const productResult = await client.query(
+            `INSERT INTO products 
+            (product_id, category_id, seller_id, name, description, sku, price, mrp, stock_quantity, weight, length, breadth, height, brand, images, slug, color, size, room, discount_percent) 
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) 
+            RETURNING *`,
+            [
+                category_id,
+                sellerIdToUse,
+                name,
+                description,
+                sku,
+                price,
+                mrp,
+                stock_quantity || 0,
+                weight || 0,
+                length || 0,
+                breadth || 0,
+                height || 0,
+                brand,
+                (images && images.length > 0) ? images.map(img => typeof img === 'string' ? img : img.url) : [],
+                slug || name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
+                color,
+                size,
+                room,
+                discount_percent || 0
+            ]
+        );
 
             const product = productResult.rows[0];
 
@@ -496,7 +498,20 @@ export const updateVariant = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Update the variant record
+        // 1. Ownership Check (Before Update)
+        const vCheck = await client.query("SELECT product_id FROM product_variants WHERE variant_id = $1", [variant_id]);
+        if (vCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Variant not found' });
+        }
+
+        const prodCheck = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [vCheck.rows[0].product_id]);
+        if (req.user.type === 'seller' && prodCheck.rows[0]?.seller_id !== req.user.id) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own the parent product of this variant' });
+        }
+
+        // 2. Update the variant record
         const vResult = await client.query(
             `UPDATE product_variants 
              SET name = COALESCE(NULLIF($1, ''), name), 
@@ -508,7 +523,7 @@ export const updateVariant = async (req, res) => {
                  weight = COALESCE($7, weight)
              WHERE variant_id = $8 RETURNING *`,
             [
-                name, // This is the variant's OWN name now
+                name, 
                 variant_name,
                 variant_value,
                 (price === "" || price === undefined) ? null : price,
@@ -519,19 +534,7 @@ export const updateVariant = async (req, res) => {
             ]
         );
 
-        if (vResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: 'Variant not found' });
-        }
-
         const variant = vResult.rows[0];
-
-        // Ownership Check (Need to check product ownership)
-        const prodCheck = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [variant.product_id]);
-        if (req.user.type === 'seller' && prodCheck.rows[0]?.seller_id !== req.user.id) {
-            await client.query('ROLLBACK');
-            return res.status(403).json({ success: false, message: 'Unauthorized: You do not own the parent product of this variant' });
-        }
 
         // 2. Log the action
         await logAction(req, 'UPDATE_VARIANT', { variant_id, product_id: variant.product_id, updates: req.body });

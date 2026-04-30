@@ -258,7 +258,6 @@ export default function AdminAuthPage() {
           setLoginEmail(resData.email);
           setShow2FA(true);
         } else {
-          localStorage.setItem("token", resData.data.token);
           loginUser(resData.data);
           toast({ title: successMsg, description: isLogin ? `Accessing your ${formData.type === 'super_admin' ? 'Super Admin' : 'Admin'} dashboard...` : "Your account is ready." });
           navigate("/admin");
@@ -285,7 +284,6 @@ export default function AdminAuthPage() {
       const resData = await resp.json();
       
       if (resp.ok && resData.success) {
-        localStorage.setItem("token", resData.data.token);
         loginUser(resData.data);
         toast({ title: "Welcome Super Admin!", description: "Accessing elevated dashboard..." });
         setShow2FA(false);

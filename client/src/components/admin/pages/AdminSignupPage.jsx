@@ -120,7 +120,6 @@ export default function AdminSignupPage() {
       const data = await resp.json();
       
       if (resp.ok) {
-        localStorage.setItem("token", data.data.token);
         loginUser(data.data);
         toast({ title: "Admin Registration Successful!", description: "Welcome to the Home Products Admin Portal." });
         navigate("/admin");

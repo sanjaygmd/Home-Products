@@ -65,8 +65,7 @@ export const loginCustomer = async (req, res) => {
         email: user.email,
         phone: user.phone,
         profile_picture_url: user.profile_picture_url,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       }
     })
 
@@ -151,8 +150,7 @@ export const registerCustomer = async (req, res) => {
         email: result.rows[0].email,
         phone: result.rows[0].phone,
         profile_picture_url: result.rows[0].profile_picture_url,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       },
     });
 

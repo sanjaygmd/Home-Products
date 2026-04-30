@@ -87,6 +87,25 @@ export const addReview = async (req, res) => {
     const customer_id = req.user.id; // From verifyToken middleware
 
     try {
+        // Security Fix: Check if customer has a verified purchase for this product
+        const purchaseCheck = await pool.query(
+            `SELECT oi.order_item_id
+             FROM order_items oi
+             JOIN orders o ON oi.order_id = o.order_id
+             WHERE o.customer_id = $1 
+               AND oi.product_id = $2 
+               AND o.order_status = 'Delivered'
+             LIMIT 1`,
+            [customer_id, product_id]
+        );
+
+        if (purchaseCheck.rows.length === 0) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "You can only review products that have been delivered to you." 
+            });
+        }
+
         // Check if review already exists for this product by this customer
         const existing = await pool.query(
             "SELECT * FROM reviews WHERE product_id = $1 AND customer_id = $2",
@@ -140,6 +159,7 @@ export const checkCanReview = async (req, res) => {
             JOIN orders o ON oi.order_id = o.order_id
             WHERE o.customer_id = $1 
               AND oi.product_id = $2 
+              AND o.order_status = 'Delivered'
             LIMIT 1
         `;
         const result = await pool.query(query, [customer_id, productId]);

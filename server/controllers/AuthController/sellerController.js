@@ -86,8 +86,7 @@ export const loginSeller = async (req, res) => {
         email: user.email,
         phone: user.phone,
         is_verified: user.is_verified,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       }
     })
 
@@ -190,8 +189,7 @@ export const registerSeller = async (req, res) => {
       message: "Seller registered successfully",
       data: {
         ...result.rows[0],
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       },
     });
 

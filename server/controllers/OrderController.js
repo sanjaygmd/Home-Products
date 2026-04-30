@@ -8,15 +8,12 @@ export const createOrder = async (req, res) => {
   try {
     const {
       address_details, // { full_name, phone, address_line_1, city, state, pincode }
-      items, // [{ product_id, variant_id, quantity, unit_price, seller_id }]
+      items, // [{ product_id, variant_id, quantity, seller_id }]
       payment_method,
       payment_id, // Razorpay payment ID
       razorpay_order_id,
       razorpay_signature,
-      subtotal,
-      shipping_charges,
-      tax_amount,
-      total_amount,
+      shipping_charges = 0,
       discount_amount = 0,
       coupon_id = null
     } = req.body;
@@ -68,148 +65,161 @@ export const createOrder = async (req, res) => {
       address_id = addrRes.rows[0].address_id;
     }
 
-    // 2. Insert into orders
+    // 2. Initial order values (will be updated after item loop)
+    const order_id = crypto.randomUUID();
     const payment_status = payment_method === 'cod' ? 'Pending' : 'Paid';
-
-    // Automatic calculation of fees to ensure they are never 0 for new orders
-    const subtotal_val = parseFloat(subtotal) || 0;
-    const final_platform_fee = parseFloat(req.body.platform_fee) || 10;
-    const final_tax_amount = parseFloat(tax_amount) || Math.round(subtotal_val * 0.05);
-    const final_cod_fee = parseFloat(req.body.cod_fee) || (payment_method === 'cod' ? 50 : 0);
-    const final_shipping = parseFloat(shipping_charges) || 0;
-
-    const orderRes = await client.query(
-      `INSERT INTO orders (order_id, customer_id, address_id, subtotal, shipping_charges, tax_amount, total_amount, discount_amount, coupon_id, platform_fee, cod_fee, order_status, payment_status, payment_method)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $10, $11, 'Pending', $9, $12)
-       RETURNING order_id`,
-      [customer_id, address_id, subtotal_val, final_shipping, final_tax_amount, total_amount, discount_amount, coupon_id, payment_status, final_platform_fee, final_cod_fee, payment_method]
-    );
-    const order_id = orderRes.rows[0].order_id;
-
-    // Update coupon usage count if applicable (Atomic check and update)
-    if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
-      try {
-        const couponCheck = await client.query(
-          "SELECT max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
-          [coupon_id]
-        );
-
-        if (couponCheck.rows.length > 0) {
-          const { max_usage, used_count } = couponCheck.rows[0];
-          
-          // Check if customer already used this coupon
-          const customerUsage = await client.query(
-            "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
-            [coupon_id, customer_id]
-          );
-          if (customerUsage.rows.length > 0) {
-            throw new Error("You have already used this coupon");
-          }
-
-          if (max_usage && used_count >= max_usage) {
-            throw new Error("Coupon usage limit reached");
-          }
-
-          await client.query(
-            "UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1",
-            [coupon_id]
-          );
-
-          await client.query(
-            "INSERT INTO coupon_usage (usage_id, coupon_id, customer_id, order_id, used_at) VALUES (gen_random_uuid(), $1, $2, $3, NOW())",
-            [coupon_id, customer_id, order_id]
-          );
-        }
-      } catch (couponError) {
-        await client.query('ROLLBACK');
-        console.error("[ORDER] Coupon Error:", couponError.message);
-        return res.status(400).json({ success: false, message: couponError.message || "Failed to process coupon" });
-      }
-    }
-
-    // 3. Insert into order_items, update stock, and track seller totals
-    const commissionRate = 0.10; // Default 10%
+    
+    // 3. Process items and calculate totals (Security Fix: Server-side price validation)
+    let serverCalculatedSubtotal = 0;
     const sellerSubtotals = {};
+    const processedItems = [];
+    const commissionRate = 0.10; // Default 10%
 
     for (const item of items) {
-      const qty = parseInt(item.quantity) || 1;
+      const qty = parseInt(item.quantity);
+      if (isNaN(qty) || qty <= 0) throw new Error(`Invalid quantity for product ${item.product_id}`);
+
       const rawVId = item.variant_id || item.variantId;
       const vId = (rawVId && rawVId !== 'null' && rawVId !== '') ? rawVId : null;
 
-      // ATOMIC STOCK CHECK AND UPDATE
+      let dbPrice = 0;
+      let dbSellerId = null;
+
       if (vId) {
         const vCheck = await client.query(
-          "SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE",
+          "SELECT pv.price, p.seller_id, pv.stock_quantity FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 FOR UPDATE",
           [vId]
         );
-        if (vCheck.rows.length === 0 || vCheck.rows[0].stock_quantity < qty) {
-          throw new Error(`Insufficient stock for variant ${vId}`);
-        }
-        await client.query(
-          "UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2",
-          [qty, vId]
-        );
+        if (vCheck.rows.length === 0) throw new Error(`Insufficient stock or invalid product variant.`);
+        if (vCheck.rows[0].stock_quantity < qty) throw new Error(`Insufficient stock for one or more items.`);
+        
+        dbPrice = parseFloat(vCheck.rows[0].price);
+        dbSellerId = vCheck.rows[0].seller_id;
+
+        const updateRes = await client.query("UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2 AND stock_quantity >= $1", [qty, vId]);
+        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for variant ${vId}.`);
       } else {
         const pCheck = await client.query(
-          "SELECT stock_quantity FROM products WHERE product_id = $1 FOR UPDATE",
+          "SELECT price, seller_id, stock_quantity FROM products WHERE product_id = $1 FOR UPDATE",
           [item.product_id]
         );
-        if (pCheck.rows.length === 0 || pCheck.rows[0].stock_quantity < qty) {
-          throw new Error(`Insufficient stock for product ${item.product_id}`);
-        }
-        await client.query(
-          "UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2",
-          [qty, item.product_id]
-        );
+        if (pCheck.rows.length === 0) throw new Error(`Insufficient stock or invalid product.`);
+        if (pCheck.rows[0].stock_quantity < qty) throw new Error(`Insufficient stock for one or more items.`);
+
+        dbPrice = parseFloat(pCheck.rows[0].price);
+        dbSellerId = pCheck.rows[0].seller_id;
+
+        const updateRes = await client.query("UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2 AND stock_quantity >= $1", [qty, item.product_id]);
+        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for product ${item.product_id}.`);
       }
 
+      const itemTotal = dbPrice * qty;
+      serverCalculatedSubtotal += itemTotal;
+      
+      if (dbSellerId) {
+        sellerSubtotals[dbSellerId] = (sellerSubtotals[dbSellerId] || 0) + itemTotal;
+      }
+
+      processedItems.push({
+        product_id: item.product_id,
+        variant_id: vId,
+        seller_id: dbSellerId,
+        quantity: qty,
+        unit_price: dbPrice,
+        total_price: itemTotal
+      });
+    }
+
+    // 4. Validate Coupon and Calculate Discount
+    let serverDiscountAmount = 0;
+    if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
+      const couponCheck = await client.query(
+        "SELECT type, discount_percent, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
+        [coupon_id]
+      );
+
+      if (couponCheck.rows.length > 0) {
+        const coupon = couponCheck.rows[0];
+        
+        if (serverCalculatedSubtotal < parseFloat(coupon.min_order_value || 0)) {
+          throw new Error(`Minimum order value for this coupon is ₹${coupon.min_order_value}`);
+        }
+
+        const customerUsage = await client.query(
+          "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
+          [coupon_id, customer_id]
+        );
+        if (customerUsage.rows.length > 0) throw new Error("Coupon already used.");
+        if (coupon.max_usage && coupon.used_count >= coupon.max_usage) throw new Error("Coupon expired.");
+
+        if (coupon.type === 'percentage') {
+          serverDiscountAmount = (serverCalculatedSubtotal * parseFloat(coupon.discount_percent)) / 100;
+          if (coupon.max_discount) {
+            serverDiscountAmount = Math.min(serverDiscountAmount, parseFloat(coupon.max_discount));
+          }
+        } else {
+          // Fixed discount or other types can be handled here
+          serverDiscountAmount = parseFloat(discount_amount); // Fallback for fixed if not in DB
+        }
+
+        await client.query("UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1", [coupon_id]);
+        await client.query(
+          "INSERT INTO coupon_usage (usage_id, coupon_id, customer_id, order_id, used_at) VALUES (gen_random_uuid(), $1, $2, $3, NOW())",
+          [coupon_id, customer_id, order_id]
+        );
+      }
+    }
+
+    // 5. Final Order Calculations
+    const final_tax_amount = Math.round(serverCalculatedSubtotal * 0.05); // 5% Tax
+    const final_platform_fee = 10;
+    const final_cod_fee = payment_method === 'cod' ? 50 : 0;
+    const final_shipping = parseFloat(shipping_charges);
+    const final_total_amount = serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount;
+
+    // 6. Insert into orders
+    await client.query(
+      `INSERT INTO orders (
+        order_id, customer_id, address_id, subtotal, shipping_charges, 
+        tax_amount, total_amount, discount_amount, coupon_id, platform_fee, 
+        cod_fee, order_status, payment_status, payment_method
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Pending', $12, $13)`,
+      [
+        order_id, customer_id, address_id, serverCalculatedSubtotal, final_shipping, 
+        final_tax_amount, final_total_amount, serverDiscountAmount, coupon_id, final_platform_fee, 
+        final_cod_fee, payment_status, payment_method
+      ]
+    );
+
+    // 7. Insert processed items and commissions
+    for (const item of processedItems) {
       const orderItemRes = await client.query(
         `INSERT INTO order_items (order_item_id, order_id, product_id, variant_id, seller_id, quantity, unit_price, total_price, item_status)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'Pending')
          RETURNING order_item_id`,
-        [order_id, item.product_id, item.variant_id || null, item.seller_id, item.quantity, item.unit_price, item.unit_price * item.quantity]
+        [order_id, item.product_id, item.variant_id, item.seller_id, item.quantity, item.unit_price, item.total_price]
       );
       const order_item_id = orderItemRes.rows[0].order_item_id;
 
-      // c. Get Seller ID (Lookup if missing)
-      let itemSellerId = item.seller_id;
-      if (!itemSellerId || itemSellerId === 'null' || itemSellerId === 'undefined') {
-        const prodRes = await client.query("SELECT seller_id FROM products WHERE product_id = $1", [item.product_id]);
-        if (prodRes.rows.length > 0) {
-          itemSellerId = prodRes.rows[0].seller_id;
-        }
-      }
-
-      // d. Calculate Commission
-      const sale_amount = item.unit_price * item.quantity;
+      const sale_amount = item.total_price;
       const commission_amount = sale_amount * commissionRate;
       const seller_earnings = sale_amount - commission_amount;
 
       await client.query(
         `INSERT INTO seller_commissions (commission_id, order_id, order_item_id, seller_id, sale_amount, commission_rate, commission_amount, seller_earnings, status)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'Pending')`,
-        [order_id, order_item_id, itemSellerId, sale_amount, commissionRate, commission_amount, seller_earnings]
+        [order_id, order_item_id, item.seller_id, sale_amount, commissionRate, commission_amount, seller_earnings]
       );
-
-      // e. Track seller totals for order_sellers table
-      if (itemSellerId) {
-        if (!sellerSubtotals[itemSellerId]) {
-          sellerSubtotals[itemSellerId] = 0;
-        }
-        sellerSubtotals[itemSellerId] += sale_amount;
-      }
     }
 
-    // 4. Insert into order_sellers and notifications
+    // 8. Insert into order_sellers and notifications
     for (const seller_id in sellerSubtotals) {
-      if (seller_id === 'undefined' || seller_id === 'null') continue; // Extra safety
       await client.query(
         `INSERT INTO order_sellers (order_seller_id, order_id, seller_id, seller_subtotal)
          VALUES (gen_random_uuid(), $1, $2, $3)`,
         [order_id, seller_id, sellerSubtotals[seller_id]]
       );
 
-      // Create notification for the seller
       await client.query(
         `INSERT INTO notifications (notification_id, customer_id, seller_id, order_id, is_read, type, message, created_at)
          VALUES (gen_random_uuid(), $1, $2, $3, false, 'new_order', $4, NOW())`,
@@ -217,32 +227,30 @@ export const createOrder = async (req, res) => {
       );
     }
 
-    // 5. Insert into payments
+    // 9. Payment records
     const paymentRes = await client.query(
       `INSERT INTO payments (payment_id, customer_id, order_id, amount, payment_method, payment_status, transaction_id, paid_at)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)
        RETURNING payment_id`,
-      [customer_id, order_id, total_amount, payment_method, payment_status, payment_id || null, payment_status === 'Paid' ? new Date() : null]
+      [customer_id, order_id, final_total_amount, payment_method, payment_status, payment_id || null, payment_status === 'Paid' ? new Date() : null]
     );
     const internal_payment_id = paymentRes.rows[0].payment_id;
 
-    // 5b. Log into finance_transactions if Paid
     if (payment_status === 'Paid') {
       await client.query(
         `INSERT INTO finance_transactions (finance_transactions_id, order_id, payment_id, transaction_type, amount, created_at)
-             VALUES (gen_random_uuid(), $1, $2, 'order_payment', $3, NOW())`,
-        [order_id, internal_payment_id, total_amount]
+         VALUES (gen_random_uuid(), $1, $2, 'order_payment', $3, NOW())`,
+        [order_id, internal_payment_id, final_total_amount]
       );
     }
 
-    // 6. Insert into order_status_history
     await client.query(
       `INSERT INTO order_status_history (history_id, order_id, changed_by, status, notes)
-         VALUES (gen_random_uuid(), $1, $2, 'Pending', 'Order placed successfully')`,
+       VALUES (gen_random_uuid(), $1, $2, 'Pending', 'Order placed successfully')`,
       [order_id, customer_id]
     );
 
-    // 7. Clear Cart
+    // 10. Cleanup Cart
     const cartRes = await client.query("SELECT cart_id FROM cart WHERE customer_id = $1", [customer_id]);
     if (cartRes.rows.length > 0) {
       const cart_id = cartRes.rows[0].cart_id;
@@ -250,39 +258,33 @@ export const createOrder = async (req, res) => {
       await client.query("UPDATE cart SET item_count = 0, total_amount = 0, updated_at = NOW() WHERE cart_id = $1", [cart_id]);
     }
 
-    // 8. Create Order Confirmation Notification for Customer
     await client.query(
       `INSERT INTO notifications (notification_id, customer_id, order_id, is_read, type, message, created_at)
        VALUES (gen_random_uuid(), $1, $2, false, 'order_placed', $3, NOW())`,
       [customer_id, order_id, `Your order #${order_id.slice(0, 8).toUpperCase()} has been placed successfully!`]
     );
 
-    // 8b. Create Global Admin Notification
     await client.query(
       `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
        VALUES (gen_random_uuid(), 'new_order', $1, NOW(), false)`,
-      [`New Order #${order_id.slice(0, 8).toUpperCase()} received! Total: ₹${total_amount}`]
+      [`New Order #${order_id.slice(0, 8).toUpperCase()} received! Total: ₹${final_total_amount}`]
     );
 
     await client.query('COMMIT');
 
-
-    // 9. Sync with Shiprocket (Background/Non-blocking to prevent UI timeout)
     pushOrderToShiprocket(order_id).catch(srError => {
         console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
     });
 
-
-    res.status(201).json({
-      success: true,
-      message: "Order placed successfully",
-      order_id
-    });
+    res.status(201).json({ success: true, message: "Order placed successfully", order_id });
 
   } catch (error) {
     await client.query('ROLLBACK');
     console.error(`[ORDER FATAL ERROR]`, error);
-    res.status(500).json({ success: false, message: error.message || "Failed to place order" });
+    // Security Fix: Mask raw technical errors but allow through known business errors
+    const businessErrors = ["Insufficient stock", "Minimum order value", "Coupon already used", "Coupon expired", "Invalid payment signature", "Administrators are restricted", "Invalid quantity"];
+    const userMessage = businessErrors.some(msg => error.message?.includes(msg)) ? error.message : "Failed to place order. Please try again later.";
+    res.status(500).json({ success: false, message: userMessage });
   } finally {
     client.release();
   }
@@ -290,7 +292,10 @@ export const createOrder = async (req, res) => {
 
 export const getMyOrders = async (req, res) => {
   try {
-    const customer_id = req.user.id;
+    const { customer_id: paramId } = req.params;
+    const isRestricted = req.user.type === 'customer';
+    const customer_id = isRestricted ? req.user.id : (paramId || req.user.id);
+
     const result = await pool.query(
       `SELECT o.*, 
              (SELECT json_agg(oi.*) FROM order_items oi WHERE oi.order_id = o.order_id) as items
@@ -468,12 +473,17 @@ export const updateOrderStatus = async (req, res) => {
       );
 
       if (payRes.rows.length > 0) {
-        // Log into finance_transactions
-        await client.query(
-          `INSERT INTO finance_transactions (finance_transactions_id, order_id, payment_id, transaction_type, amount, created_at)
-                     VALUES (gen_random_uuid(), $1, $2, 'order_payment', $3, NOW())`,
-          [order_id, payRes.rows[0].payment_id, payRes.rows[0].amount]
-        );
+        // [FIX] Duplicate Transaction Guard: Only log 'order_payment' for COD on delivery. 
+        // Online payments are already logged at creation (createOrder step 5b).
+        const orderInfo = await client.query('SELECT payment_method FROM orders WHERE order_id = $1', [order_id]);
+        
+        if (orderInfo.rows[0]?.payment_method === 'cod') {
+          await client.query(
+            `INSERT INTO finance_transactions (finance_transactions_id, order_id, payment_id, transaction_type, amount, created_at)
+                       VALUES (gen_random_uuid(), $1, $2, 'order_payment', $3, NOW())`,
+            [order_id, payRes.rows[0].payment_id, payRes.rows[0].amount]
+          );
+        }
 
         // Update order payment status
         await client.query("UPDATE orders SET payment_status = 'Paid' WHERE order_id = $1", [order_id]);

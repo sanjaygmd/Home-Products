@@ -43,7 +43,7 @@ const syncCartSummary = async (client, cart_id) => {
 export const getCart = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized access to cart' });
     }
 
@@ -104,7 +104,7 @@ export const addToCart = async (req, res) => {
         return res.status(400).json({ success: false, message: 'customer_id, product_id and price are required' });
     }
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only add items to your own cart' });
     }
 
@@ -210,7 +210,7 @@ export const updateCartItem = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Cart item not found' });
         }
 
-        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+        if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
         }
 
@@ -261,7 +261,7 @@ export const removeFromCart = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Cart item not found' });
         }
 
-        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+        if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
         }
 
@@ -289,7 +289,7 @@ export const removeFromCart = async (req, res) => {
 export const clearCart = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only clear your own cart' });
     }
 

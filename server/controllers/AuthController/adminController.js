@@ -12,6 +12,13 @@ import { sendOrderStatusNotifications } from "../../utils/notifications.js";
 import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP } from "../../utils/mailer.js";
 
 const superAdminLoginOtps = new Map();
+const resetOtps = new Map();
+
+const isPasswordStrong = (password) => {
+  // Min 8 chars, at least one uppercase, one lowercase, one number, and one special character
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+  return regex.test(password);
+};
 
 export const registerAdmin = async (req, res) => {
   try {
@@ -21,8 +28,11 @@ export const registerAdmin = async (req, res) => {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({ success: false, message: "Password must be at least 8 characters long" });
+    if (!isPasswordStrong(password)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+      });
     }
 
 
@@ -83,8 +93,7 @@ export const registerAdmin = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       }
     });
 
@@ -172,8 +181,7 @@ export const loginAdmin = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       }
     });
 
@@ -241,8 +249,7 @@ export const verifySuperAdminLogin = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        sessionId: session.sessionId,
-        token: session.token
+        sessionId: session.sessionId
       }
     });
 
@@ -274,8 +281,6 @@ export const logoutAdmin = async (req, res) => {
  * Request Password Reset (Admin)
  * This creates a notification for Super Admins
  */
-const resetOtps = new Map();
-
 export const requestAdminPasswordReset = async (req, res) => {
   try {
     const { email } = req.body;
@@ -334,8 +339,11 @@ export const verifyAdminPasswordReset = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email, OTP, and new password are required" });
     }
 
-    if (newPassword.length < 8) {
-      return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+      });
     }
 
 
@@ -1790,7 +1798,7 @@ export const autoDispatchOrders = async (req, res) => {
         await client.query('ROLLBACK');
         console.error(`Auto-Dispatch Error for Order ${orderId}:`, err.message);
         results.failed++;
-        results.details.push({ orderId, status: 'Failed', error: err.message });
+        results.details.push({ orderId, status: 'Failed', error: "Shiprocket dispatch failed" });
       } finally {
         client.release();
       }

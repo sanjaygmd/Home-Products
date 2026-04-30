@@ -37,7 +37,7 @@ const syncWishlistSummary = async (client, wishlist_id) => {
 export const getWishlist = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized access to wishlist' });
     }
 
@@ -91,7 +91,7 @@ export const addToWishlist = async (req, res) => {
         return res.status(400).json({ success: false, message: 'customer_id and product_id are required' });
     }
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only add items to your own wishlist' });
     }
 
@@ -145,7 +145,7 @@ export const removeFromWishlist = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Wishlist item not found' });
         }
 
-        if (req.user.type === 'customer' && ownershipCheck.rows[0].customer_id !== req.user.id) {
+        if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this wishlist item' });
         }
 
@@ -173,7 +173,7 @@ export const removeFromWishlist = async (req, res) => {
 export const clearWishlist = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.type === 'customer' && req.user.id !== customer_id) {
+    if (req.user.id !== customer_id && req.user.type !== 'admin') {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only clear your own wishlist' });
     }
 

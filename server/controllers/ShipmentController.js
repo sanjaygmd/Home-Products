@@ -252,7 +252,7 @@ export const initiateShipment = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(`\n[SHIPROCKET ERROR] Failed to dispatch order ${orderId}:`, error.message);
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: "Failed to initiate shipment. Please try again." });
     } finally {
         client.release();
     }
@@ -324,7 +324,7 @@ export const getServiceability = async (req, res) => {
             return res.status(400).json({ success: false, message: svcRes.message || "Failed to fetch serviceability" });
         }
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
@@ -341,7 +341,7 @@ export const syncTracking = async (req, res) => {
         const tracking = await getShiprocketTracking(srOrder.rows[0].awb_code);
         return res.status(200).json({ success: true, data: tracking });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 

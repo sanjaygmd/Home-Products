@@ -23,14 +23,16 @@ export function AuthProvider({ children }) {
   const loginUser = (user) => {
     localStorage.removeItem("seller"); // Ensure no conflict
     const role = user.role || 'customer';
-    const formattedUser = { ...user, role };
+    const { token, ...userWithoutToken } = user;
+    const formattedUser = { ...userWithoutToken, role };
     localStorage.setItem("auth", JSON.stringify(formattedUser));
     setCurrentUser(formattedUser);
   };
 
   const loginSeller = (sellerData) => {
     localStorage.removeItem("auth"); // Ensure no conflict
-    const formattedSeller = { ...sellerData, role: 'seller' };
+    const { token, ...sellerWithoutToken } = sellerData;
+    const formattedSeller = { ...sellerWithoutToken, role: 'seller' };
     localStorage.setItem("seller", JSON.stringify(formattedSeller));
     setCurrentUser(formattedSeller);
   };

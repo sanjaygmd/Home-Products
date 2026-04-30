@@ -79,9 +79,10 @@ const otpLimiter = rateLimit({
 });
 
 // Apply rate limiters to specific routes
-// app.use('/user/customer/login', authLimiter);
-// app.use('/user/seller/login', authLimiter);
-// app.use('/user/admin/login', authLimiter);
+app.use('/user/customer/login', authLimiter);
+app.use('/user/seller/login', authLimiter);
+app.use('/user/admin/login', authLimiter);
+app.use('/user/admin/verify-super-admin-login', authLimiter);
 // app.use('/user/customer/send-otp', otpLimiter);
 // app.use('/user/seller/send-otp', otpLimiter);
 // app.use('/user/customer/verify-otp', otpLimiter); // Protect verification from brute-force
