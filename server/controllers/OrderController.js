@@ -417,6 +417,12 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     if (req.user.type === 'seller') {
+      const sellerAllowedStatuses = ['Processing', 'Shipped', 'Cancelled'];
+      if (!sellerAllowedStatuses.includes(status)) {
+        client.release();
+        return res.status(403).json({ success: false, message: "Sellers are only permitted to update status to Processing, Shipped, or Cancelled." });
+      }
+
       const sellerItemCheck = await client.query(
         "SELECT 1 FROM order_items WHERE order_id = $1 AND seller_id = $2 LIMIT 1",
         [order_id, req.user.id]

@@ -349,7 +349,7 @@ export const processAutoPayout = async (orderId) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Auto payout failed for order", orderId, error);
-        return { success: false, error: error.message };
+        return { success: false, error: error.message }; // Internal usage only, not sent directly to client
     } finally {
         client.release();
     }

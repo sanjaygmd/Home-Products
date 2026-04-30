@@ -23,7 +23,10 @@ export const loginCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
-    const existingUser = await pool.query("SELECT * FROM customers WHERE email = $1", [email])
+    const existingUser = await pool.query(
+      "SELECT customer_id, full_name, email, phone, is_active, block_reason, password_hash, profile_picture_url FROM customers WHERE email = $1", 
+      [email]
+    )
     if (existingUser.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -394,6 +397,22 @@ export const getCustomerAddresses = async (req, res) => {
   } catch (error) {
     console.error("GET CUSTOMER ADDRESSES ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to get customer addresses" });
+  }
+};
+
+export const getMe = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT customer_id, full_name, email, phone, date_of_birth, gender, profile_picture_url, is_active, created_at FROM customers WHERE customer_id = $1",
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error("GET ME ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch user profile" });
   }
 };
 

@@ -7,39 +7,36 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Sync with localStorage on load
-    const auth = JSON.parse(localStorage.getItem("auth"));
-    const seller = JSON.parse(localStorage.getItem("seller"));
-    if (auth) {
-      // If auth exists, it's either customer or admin
-      const role = auth.role || 'customer';
-      setCurrentUser({ ...auth, role });
-    } else if (seller) {
-      setCurrentUser({ ...seller, role: 'seller' });
-    }
-    setLoading(false);
+    const fetchUser = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/user/me`);
+        const data = await response.json();
+        if (data.success) {
+          setCurrentUser(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUser();
   }, []);
 
   const loginUser = (user) => {
-    localStorage.removeItem("seller"); // Ensure no conflict
     const role = user.role || 'customer';
     const { token, ...userWithoutToken } = user;
     const formattedUser = { ...userWithoutToken, role };
-    localStorage.setItem("auth", JSON.stringify(formattedUser));
     setCurrentUser(formattedUser);
   };
 
   const loginSeller = (sellerData) => {
-    localStorage.removeItem("auth"); // Ensure no conflict
     const { token, ...sellerWithoutToken } = sellerData;
     const formattedSeller = { ...sellerWithoutToken, role: 'seller' };
-    localStorage.setItem("seller", JSON.stringify(formattedSeller));
     setCurrentUser(formattedSeller);
   };
 
   const logoutUser = () => {
-    localStorage.removeItem("auth");
-    localStorage.removeItem("seller");
     setCurrentUser(null);
   };
 

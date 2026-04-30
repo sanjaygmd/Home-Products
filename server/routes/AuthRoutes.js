@@ -13,7 +13,8 @@ import {
   getCustomerOrders,
   getCustomerAddresses,
   sendOTP,
-  verifyOTP
+  verifyOTP,
+  getMe
 } from '../controllers/AuthController/customerController.js';
 import { registerSeller, sellerOnboarding, loginSeller, logoutSeller, getSellerStats, getSellerDashboardData, getSellerOrders, getSellerCustomers, getSellerProfile, updateSellerProfile, getSellerPayments, getSellerFinanceAnalytics, getSellerNotifications, markNotificationRead } from '../controllers/AuthController/sellerController.js';
 import { registerAdmin, loginAdmin, verifySuperAdminLogin, logoutAdmin, requestAdminPasswordReset, verifyAdminPasswordReset, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, deleteSeller, getAllPayments, getAllReturns, resolveReturnRequest, changeAdminPassword, updateAdminPasswordSelf, updateMasterKey, getAuditLogs, getAllAdministrators, updateAdminStatus, deleteAdministrator } from '../controllers/AuthController/adminController.js';
@@ -22,6 +23,8 @@ import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanRevi
 import { verifyToken, requireAuth } from '../middlewares/authMiddleware.js';
 
 const authRoutes = express.Router();
+
+authRoutes.get('/me', verifyToken, getMe);
 
 // Customer Routes
 authRoutes.post('/customer/register', registerCustomer);

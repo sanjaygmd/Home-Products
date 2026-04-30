@@ -70,7 +70,6 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
             product_id: item.product_id,
             variant_id: item.variant_id || null,
             quantity: item.quantity || 1,
-            unit_price: item.discountPrice || item.price,
             seller_id: item.seller_id
           };
         }),

@@ -1366,7 +1366,7 @@ export const deleteSeller = async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error("DELETE SELLER ERROR:", error);
-    return res.status(500).json({ success: false, message: "Failed to delete seller account. " + error.message });
+    return res.status(500).json({ success: false, message: "Failed to delete seller account. Please try again." });
   } finally {
     client.release();
   }

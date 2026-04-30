@@ -39,11 +39,12 @@ app.use(cors({
             process.env.CLIENT_URL || 'http://localhost:5173',
             'http://127.0.0.1:5173',
             'http://localhost:5174',
-            'http://127.0.0.1:5174',
-            'http://localhost:5000',
-            'http://127.0.0.1:5000'
+            'http://127.0.0.1:5174'
         ];
-        if (origin === undefined || allowedOrigins.indexOf(origin) !== -1) {
+        // Only allow undefined origin (non-browser requests) in development
+        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || (origin === undefined && process.env.NODE_ENV !== 'production');
+        
+        if (isAllowed) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
