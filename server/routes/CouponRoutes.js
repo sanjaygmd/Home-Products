@@ -5,8 +5,8 @@ import { verifyToken, requireAuth } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.get('/active', verifyToken, getActiveCoupons);
-router.post('/validate', verifyToken, validateCoupon);
+router.get('/active', requireAuth(['customer']), getActiveCoupons);
+router.post('/validate', requireAuth(['customer']), validateCoupon);
 router.get('/all', requireAuth(['admin', 'super_admin']), getAllCoupons);
 router.post('/create', requireAuth(['admin', 'super_admin']), createCoupon);
 router.put('/update/:id', requireAuth(['admin', 'super_admin']), updateCoupon);

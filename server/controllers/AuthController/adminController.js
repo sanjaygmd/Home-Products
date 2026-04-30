@@ -10,15 +10,11 @@ import { processAutoPayout } from "../PayoutController.js";
 import { pushOrderToShiprocket, createShiprocketReturn } from "../ShipmentController.js";
 import { sendOrderStatusNotifications } from "../../utils/notifications.js";
 import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP } from "../../utils/mailer.js";
+import { isPasswordStrong } from "../../utils/validation.js";
 
 const superAdminLoginOtps = new Map();
 const resetOtps = new Map();
 
-const isPasswordStrong = (password) => {
-  // Min 8 chars, at least one uppercase, one lowercase, one number, and one special character
-  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-  return regex.test(password);
-};
 
 export const registerAdmin = async (req, res) => {
   try {
@@ -1426,8 +1422,11 @@ export const changeAdminPassword = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized: Only Super Administrators can change passwords." });
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+      });
     }
 
     // Check if target is an admin or another super admin
@@ -1870,8 +1869,15 @@ export const updateAdminPasswordSelf = async (req, res) => {
     const { id, type } = req.user;
     const { currentPassword, newPassword } = req.body;
 
-    if (!currentPassword || !newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: "Current password and a new password (min 6 chars) are required." });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Current and new passwords are required." });
+    }
+
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "New password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+      });
     }
 
     const table = type === 'super_admin' ? 'super_admins' : 'admins';

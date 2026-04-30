@@ -43,7 +43,7 @@ app.use(cors({
             'http://localhost:5000',
             'http://127.0.0.1:5000'
         ];
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        if (origin === undefined || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
@@ -56,8 +56,7 @@ app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
         const duration = Date.now() - start;
-        const setCookie = res.get('Set-Cookie');
-        const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)${setCookie ? ` [Set-Cookie: ${setCookie}]` : ''}\n`;
+        const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)\n`;
         try {
             fs.appendFileSync(path.join(process.cwd(), 'debug_requests.log'), entry);
         } catch (e) {}
@@ -83,11 +82,11 @@ app.use('/user/customer/login', authLimiter);
 app.use('/user/seller/login', authLimiter);
 app.use('/user/admin/login', authLimiter);
 app.use('/user/admin/verify-super-admin-login', authLimiter);
-// app.use('/user/customer/send-otp', otpLimiter);
-// app.use('/user/seller/send-otp', otpLimiter);
-// app.use('/user/customer/verify-otp', otpLimiter); // Protect verification from brute-force
-// app.use('/user/seller/verify-otp', otpLimiter);
-// app.use('/user/admin/verify-password-reset', otpLimiter);
+app.use('/user/customer/send-otp', otpLimiter);
+app.use('/user/seller/send-otp', otpLimiter);
+app.use('/user/customer/verify-otp', otpLimiter); // Protect verification from brute-force
+app.use('/user/seller/verify-otp', otpLimiter);
+app.use('/user/admin/verify-password-reset', otpLimiter);
 
 app.use('/user', authRoutes);
 app.use('/coupon', couponRoutes);
