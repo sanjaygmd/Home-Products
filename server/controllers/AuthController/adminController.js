@@ -235,7 +235,7 @@ export const verifySuperAdminLogin = async (req, res) => {
 
     superAdminLoginOtps.delete(email);
 
-    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+    setSessionCookie(res, 'super_admin', session.token);
 
     return res.status(200).json({
       success: true,
@@ -258,17 +258,61 @@ export const verifySuperAdminLogin = async (req, res) => {
 
 export const logoutAdmin = async (req, res) => {
   try {
-    const { sessionId } = req.body;
+    const sessionId = req.sessionId;
     if (sessionId) {
       await invalidateSession(sessionId);
     }
-    res.clearCookie('token', { path: '/' });
-    res.clearCookie('admin_token', { path: '/' });
-    res.clearCookie('seller_token', { path: '/' });
-    res.clearCookie('customer_token', { path: '/' });
+    res.clearCookie('token', { path: '/', httpOnly: true });
+    res.clearCookie('admin_token', { path: '/', httpOnly: true });
+    res.clearCookie('seller_token', { path: '/', httpOnly: true });
+    res.clearCookie('customer_token', { path: '/', httpOnly: true });
+    res.clearCookie('super_admin_token', { path: '/', httpOnly: true });
     return res.status(200).json({ success: true, message: "Admin logged out" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Logout failed" });
+  }
+};
+
+
+/**
+ * Update Admin / Super Admin Profile
+ */
+export const updateAdminProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Ownership check — only the admin themselves can update their profile
+    if (req.user.id !== id) {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    const { name, email, phone, address } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ success: false, message: "Name and email are required" });
+    }
+
+    const table = req.user.type === 'super_admin' ? 'super_admins' : 'admins';
+    const idCol = req.user.type === 'super_admin' ? 'super_admin_id' : 'admin_id';
+
+    await pool.query(
+      `UPDATE ${table} SET name = $1, email = $2, updated_at = NOW() WHERE ${idCol} = $3`,
+      [name, email, id]
+    );
+
+    const updatedUser = await pool.query(
+      `SELECT ${idCol} as id, name, email, role FROM ${table} WHERE ${idCol} = $1`,
+      [id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: { ...updatedUser.rows[0], role: req.user.type }
+    });
+  } catch (error) {
+    console.error("UPDATE ADMIN PROFILE ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update profile" });
   }
 };
 

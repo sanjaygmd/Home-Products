@@ -1,9 +1,11 @@
 import React, { useContext, useState, useEffect } from "react";
 import { ProductContext } from "../../context/ProductContext/ProductContext";
 import * as productService from "../../services/productService";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const AddProduct = ({ onClose }) => {
   const { addProduct } = useContext(ProductContext);
+  const { currentUser } = useAuth();
   const [categories, setCategories] = useState([]);
   const [images, setImages] = useState([]); // Array of { url, variantTempId }
   const [variants, setVariants] = useState([]);
@@ -120,14 +122,12 @@ const AddProduct = ({ onClose }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const auth = JSON.parse(localStorage.getItem("seller"));
+    const sellerId = currentUser?.id;
 
-    if (!auth || (!auth.seller_id && !auth.id)) {
+    if (!sellerId) {
       alert("Please login as a seller to add products");
       return;
     }
-
-    const sellerId = auth.seller_id || auth.id;
 
     if (!form.name || !form.price || !form.category_id) {
       alert("Please fill required fields (Name, Price, Category)");

@@ -7,9 +7,11 @@ import MapIcon from '@mui/icons-material/Map';
 import PhoneIcon from '@mui/icons-material/Phone';
 import PersonIcon from '@mui/icons-material/Person';
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerPickups = () => {
-    const seller = JSON.parse(localStorage.getItem("seller"));
-    const sellerId = seller?.seller_id || seller?.id;
+    const { currentUser } = useAuth();
+    const sellerId = currentUser?.id;
 
     const [pickups, setPickups] = useState([]);
     const [loading, setLoading] = useState(true);

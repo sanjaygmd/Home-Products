@@ -9,32 +9,29 @@ import ProfileWishlist from "./ProfileWishlist";
 import ProfileSettings from "./ProfileSettings";
 
 import { getCustomerById } from "../../services/authService";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const ProfilePage = () => {
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState("loading");
 
   useEffect(() => {
-    const seller = localStorage.getItem("seller");
-    const authSession = localStorage.getItem("auth");
-
-    if (seller || !authSession) {
+    if (!currentUser) {
       navigate("/customer-login");
       return;
     }
 
-    const auth = JSON.parse(authSession);
-
-    if (!auth?.id) {
-      setStatus("error");
+    if (currentUser.role !== 'customer') {
+      navigate("/");
       return;
     }
 
     const fetchUser = async () => {
       try {
-        const res = await getCustomerById(auth.id);
+        const res = await getCustomerById(currentUser.id);
 
         if (res.success) {
           setUser(res.data);
@@ -48,7 +45,7 @@ const ProfilePage = () => {
     };
 
     fetchUser();
-  }, []);
+  }, [currentUser]);
 
   const renderTab = () => {
     switch (activeTab) {

@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
+import { logoutUser as authServiceLogout } from "../services/authService.js";
+import { api } from "../services/api.js";
 
 const AuthContext = createContext();
 
@@ -9,10 +11,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/user/me`);
-        const data = await response.json();
-        if (data.success) {
-          setCurrentUser(data.data);
+        const response = await api.get('/user/me');
+        if (response.data.success) {
+          setCurrentUser(response.data.data);
         }
       } catch (err) {
         console.error("Failed to fetch user:", err);
@@ -36,8 +37,20 @@ export function AuthProvider({ children }) {
     setCurrentUser(formattedSeller);
   };
 
-  const logoutUser = () => {
-    setCurrentUser(null);
+  const logoutUser = async () => {
+    try {
+      await authServiceLogout();
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      setCurrentUser(null);
+      // Aggressively clear all possible auth-related local storage items
+      localStorage.removeItem('user');
+      localStorage.removeItem('auth');
+      localStorage.removeItem('seller');
+      localStorage.removeItem('token');
+      localStorage.removeItem('admin');
+    }
   };
 
   return (

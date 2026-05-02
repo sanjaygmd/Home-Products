@@ -3,6 +3,13 @@ import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Shield, Mail, Lock, User, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useToast } from "../../../hooks/use-toast";
+import { 
+  adminLogin, 
+  adminRegister, 
+  verifySuperAdminLogin, 
+  requestAdminPasswordReset, 
+  verifyAdminPasswordReset 
+} from "../../../services/authService";
 
 const G = {
   primary: "#2563EB", // Blue-600 for Admin
@@ -190,12 +197,7 @@ export default function AdminAuthPage() {
     
     if (resetStep === 1) {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/admin/request-password-reset`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: resetEmail })
-        });
-        const resData = await resp.json();
+        const resData = await requestAdminPasswordReset(resetEmail);
         if (resData.success) {
           toast({ title: "Code Sent", description: resData.message });
           setResetStep(2);
@@ -209,12 +211,7 @@ export default function AdminAuthPage() {
       }
     } else {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/admin/verify-password-reset`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: resetEmail, otp: resetOtp, newPassword: resetNewPassword })
-        });
-        const resData = await resp.json();
+        const resData = await verifyAdminPasswordReset({ email: resetEmail, otp: resetOtp, newPassword: resetNewPassword });
         if (resData.success) {
           toast({ title: "Password Reset", description: "You can now log in with your new password." });
           closeResetModal();
@@ -241,18 +238,12 @@ export default function AdminAuthPage() {
     e.preventDefault();
     setLoading(true);
     
-    const endpoint = isLogin ? "/user/admin/login" : "/user/admin/register";
     const successMsg = isLogin ? "Welcome back, Admin!" : "Admin setup successful!";
 
     try {
-      const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData)
-      });
-      const resData = await resp.json();
+      const resData = isLogin ? await adminLogin(formData) : await adminRegister(formData);
       
-      if (resp.ok && resData.success) {
+      if (resData.success) {
         if (resData.requires2FA) {
           toast({ title: "2FA Required", description: resData.message });
           setLoginEmail(resData.email);
@@ -276,14 +267,9 @@ export default function AdminAuthPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/admin/verify-super-admin-login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, otp: loginOtp })
-      });
-      const resData = await resp.json();
+      const resData = await verifySuperAdminLogin({ email: loginEmail, otp: loginOtp });
       
-      if (resp.ok && resData.success) {
+      if (resData.success) {
         loginUser(resData.data);
         toast({ title: "Welcome Super Admin!", description: "Accessing elevated dashboard..." });
         setShow2FA(false);

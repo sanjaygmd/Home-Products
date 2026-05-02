@@ -7,9 +7,11 @@ import DownloadIcon from '@mui/icons-material/Download';
 import SendIcon from '@mui/icons-material/Send';
 import { useToast } from "../../hooks/use-toast";
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerPayments = () => {
-  const seller = JSON.parse(localStorage.getItem("seller"));
-  const sellerId = seller?.seller_id || seller?.id;
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const { toast } = useToast();
   
   const [data, setData] = useState({

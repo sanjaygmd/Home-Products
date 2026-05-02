@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { WishListContext } from "./WishListContext";
 import * as wishlistService from "../../services/wishlistService";
+import { useAuth } from "../AuthContext";
 
 export const WishListProvider = ({ children }) => {
   const navigate = useNavigate();
@@ -9,11 +10,8 @@ export const WishListProvider = ({ children }) => {
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const pendingOps = useRef(new Set());
 
-  const getAuth = () => JSON.parse(localStorage.getItem("auth"));
-  const getCustomerId = () => {
-    const auth = getAuth();
-    return auth?.id || auth?.customer_id || auth?.admin_id || null;
-  };
+  const { currentUser } = useAuth();
+  const getCustomerId = () => currentUser?.id || null;
 
   const mapItem = (item) => ({
     wishlist_item_id: item.wishlist_item_id,
@@ -47,7 +45,7 @@ export const WishListProvider = ({ children }) => {
     } finally {
       setWishlistLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     fetchWishlist();

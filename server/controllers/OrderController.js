@@ -77,7 +77,7 @@ export const createOrder = async (req, res) => {
 
     for (const item of items) {
       const qty = parseInt(item.quantity);
-      if (isNaN(qty) || qty <= 0) throw new Error(`Invalid quantity for product ${item.product_id}`);
+      if (isNaN(qty) || qty <= 0) throw new Error(`Invalid quantity for one or more items.`);
 
       const rawVId = item.variant_id || item.variantId;
       const vId = (rawVId && rawVId !== 'null' && rawVId !== '') ? rawVId : null;
@@ -97,7 +97,7 @@ export const createOrder = async (req, res) => {
         dbSellerId = vCheck.rows[0].seller_id;
 
         const updateRes = await client.query("UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2 AND stock_quantity >= $1", [qty, vId]);
-        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for variant ${vId}.`);
+        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for one or more items.`);
       } else {
         const pCheck = await client.query(
           "SELECT price, seller_id, stock_quantity FROM products WHERE product_id = $1 FOR UPDATE",
@@ -110,7 +110,7 @@ export const createOrder = async (req, res) => {
         dbSellerId = pCheck.rows[0].seller_id;
 
         const updateRes = await client.query("UPDATE products SET stock_quantity = stock_quantity - $1 WHERE product_id = $2 AND stock_quantity >= $1", [qty, item.product_id]);
-        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for product ${item.product_id}.`);
+        if (updateRes.rowCount === 0) throw new Error(`Insufficient stock for one or more items.`);
       }
 
       const itemTotal = dbPrice * qty;

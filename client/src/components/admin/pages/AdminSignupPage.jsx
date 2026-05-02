@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Shield, Mail, Lock, User } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useToast } from "../../../hooks/use-toast";
+import { adminRegister } from "../../../services/authService";
 // Removed useCart import as it's not needed for toasts here
 
 const G = {
@@ -112,14 +113,9 @@ export default function AdminSignupPage() {
     const payload = { ...formData, role: 'admin' };
 
     try {
-      const resp = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/user/admin/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await resp.json();
+      const data = await adminRegister(payload);
       
-      if (resp.ok) {
+      if (data.success) {
         loginUser(data.data);
         toast({ title: "Admin Registration Successful!", description: "Welcome to the Home Products Admin Portal." });
         navigate("/admin");

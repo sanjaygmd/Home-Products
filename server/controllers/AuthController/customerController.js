@@ -402,14 +402,22 @@ export const getCustomerAddresses = async (req, res) => {
 
 export const getMe = async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT customer_id, full_name, email, phone, date_of_birth, gender, profile_picture_url, is_active, created_at FROM customers WHERE customer_id = $1",
-      [req.user.id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-    return res.status(200).json({ success: true, data: result.rows[0] });
+    const userTypes = {
+      customer: { table: 'customers', id: 'customer_id', fields: 'full_name as name, email, phone, date_of_birth, gender, profile_picture_url, is_active, created_at' },
+      seller: { table: 'sellers', id: 'seller_id', fields: 'full_name as name, email, phone, store_name, gstin, store_logo_url, store_description, is_verified, is_active, created_at' },
+      admin: { table: 'admins', id: 'admin_id', fields: 'name, email, role, is_active, created_at' },
+      super_admin: { table: 'super_admins', id: 'super_admin_id', fields: 'name, email, role, is_active, created_at' }
+    };
+
+    const config = userTypes[req.user.type];
+    if (!config) return res.status(400).json({ success: false, message: "Invalid user type" });
+
+    const result = await pool.query(`SELECT ${config.id} as id, ${config.fields} FROM ${config.table} WHERE ${config.id} = $1`, [req.user.id]);
+
+    if (result.rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
+
+    const userData = { ...result.rows[0], role: req.user.type };
+    return res.status(200).json({ success: true, data: userData });
   } catch (error) {
     console.error("GET ME ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch user profile" });
@@ -420,14 +428,15 @@ export const getMe = async (req, res) => {
 
 export const logoutCustomer = async (req, res) => {
   try {
-    const { sessionId } = req.body;
+    const sessionId = req.sessionId;
     if (sessionId) {
       await invalidateSession(sessionId);
     }
-    res.clearCookie('token', { path: '/' });
-    res.clearCookie('admin_token', { path: '/' });
-    res.clearCookie('seller_token', { path: '/' });
-    res.clearCookie('customer_token', { path: '/' });
+    res.clearCookie('token', { path: '/', httpOnly: true });
+    res.clearCookie('admin_token', { path: '/', httpOnly: true });
+    res.clearCookie('seller_token', { path: '/', httpOnly: true });
+    res.clearCookie('customer_token', { path: '/', httpOnly: true });
+    res.clearCookie('super_admin_token', { path: '/', httpOnly: true });
     return res.status(200).json({ success: true, message: "Logout successful" });
   } catch (error) {
     console.error("LOGOUT ERROR:", error);

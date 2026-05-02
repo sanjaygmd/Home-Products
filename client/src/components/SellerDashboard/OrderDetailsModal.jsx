@@ -5,8 +5,10 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const OrderDetailsModal = ({ orderId, onClose }) => {
+  const { currentUser } = useAuth();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [newStatus, setNewStatus] = useState("");
@@ -34,10 +36,9 @@ const OrderDetailsModal = ({ orderId, onClose }) => {
     }
 
     setUpdating(true);
-    const seller = JSON.parse(localStorage.getItem("seller"));
     const res = await updateOrderStatus(orderId, {
       status: newStatus,
-      changed_by: seller?.seller_id,
+      changed_by: currentUser?.id,
       notes: newStatus === 'Cancelled' ? cancellationReason : `Status updated to ${newStatus} by seller.`
     });
     if (res.success) {

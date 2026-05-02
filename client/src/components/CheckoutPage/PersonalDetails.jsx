@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { card, input, buttonPrimary } from "../../utils/UIStyles";
 import { getCustomerAddresses } from "../../services/authService";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const PersonalDetails = ({ onNext }) => {
+  const { currentUser } = useAuth();
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -16,19 +18,17 @@ const PersonalDetails = ({ onNext }) => {
   const [addresses, setAddresses] = useState([]);
 
   useEffect(() => {
-    const auth = JSON.parse(localStorage.getItem("auth"));
-    if (auth?.id || auth?.admin_id) {
-      // Pre-fill from auth session first
+    if (currentUser?.id) {
+      // Pre-fill from auth session
       setForm(prev => ({
         ...prev,
-        name: auth.name || "",
-        email: auth.email || "",
-        phone: auth.phone || "",
+        name: currentUser.name || "",
+        email: currentUser.email || "",
+        phone: currentUser.phone || "",
       }));
 
       // Fetch saved addresses
-      const userId = auth.id || auth.admin_id;
-      getCustomerAddresses(userId).then((res) => {
+      getCustomerAddresses(currentUser.id).then((res) => {
         if (res.success && res.data.length > 0) {
           const defaultAddr = res.data.find(a => a.is_default) || res.data[0];
           setForm(prev => ({
@@ -44,7 +44,7 @@ const PersonalDetails = ({ onNext }) => {
         }
       });
     }
-  }, []);
+  }, [currentUser]);
 
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });

@@ -47,7 +47,13 @@ export const cookieConfig = {
 export const setSessionCookie = (res, userType, token) => {
   const name = getCookieName(userType);
   
-  // Only clear the generic token and the specific one we are setting
-  res.clearCookie('token', { path: '/' });
+  // Clear all potential role cookies to prevent mutually exclusive session pollution
+  const clearOptions = { path: '/', httpOnly: true };
+  res.clearCookie('token', clearOptions);
+  res.clearCookie('customer_token', clearOptions);
+  res.clearCookie('seller_token', clearOptions);
+  res.clearCookie('admin_token', clearOptions);
+  res.clearCookie('super_admin_token', clearOptions);
+  
   res.cookie(name, token, cookieConfig);
 };

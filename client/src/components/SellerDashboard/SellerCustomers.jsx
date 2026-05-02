@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { getSellerCustomers } from "../../services/sellerService";
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerCustomers = () => {
-  const seller = JSON.parse(localStorage.getItem("seller"));
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!seller?.seller_id) return;
+    if (!sellerId) return;
 
     const fetchCustomers = async () => {
       setLoading(true);
-      const res = await getSellerCustomers(seller.seller_id);
+      const res = await getSellerCustomers(sellerId);
       if (res.success) {
         setCustomers(res.data);
       }
@@ -19,7 +22,7 @@ const SellerCustomers = () => {
     };
 
     fetchCustomers();
-  }, [seller?.seller_id]);
+  }, [sellerId]);
 
   const statusStyle = (status) =>
     status === "Active"

@@ -245,8 +245,8 @@ const NavMain = ({ sidebarOpen, setSidebarOpen }) => {
 
 
                 <button
-                  onClick={() => {
-                    logoutUser();
+                  onClick={async () => {
+                    await logoutUser();
                     window.location.href = "/";
                   }}
                   className="w-full text-left px-4 py-2 text-red-500 hover:bg-gray-100 font-bold"

@@ -6,8 +6,11 @@ import SecurityIcon from '@mui/icons-material/Security';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerSettings = () => {
-  const seller = JSON.parse(localStorage.getItem("seller"));
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,11 +31,11 @@ const SellerSettings = () => {
   });
 
   useEffect(() => {
-    if (!seller?.seller_id) return;
+    if (!sellerId) return;
 
     const fetchProfile = async () => {
       setLoading(true);
-      const res = await getSellerProfile(seller.seller_id);
+      const res = await getSellerProfile(sellerId);
       if (res.success) {
         setForm(prev => ({
           ...prev,
@@ -47,7 +50,7 @@ const SellerSettings = () => {
     };
 
     fetchProfile();
-  }, [seller?.seller_id]);
+  }, [sellerId]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -60,19 +63,9 @@ const SellerSettings = () => {
   const handleSubmit = async () => {
     setSaving(true);
     setMessage("");
-    const res = await updateSellerProfile(seller.seller_id, form);
+    const res = await updateSellerProfile(sellerId, form);
     if (res.success) {
-      // Update localStorage so other pages see the change
-      const updatedSeller = { 
-        ...seller, 
-        name: form.name, 
-        store_name: form.storeName, 
-        email: form.email, 
-        phone: form.phone 
-      };
-      localStorage.setItem("seller", JSON.stringify(updatedSeller));
-      
-      setMessage("Settings updated successfully! Refreshing...");
+      setMessage("Settings updated successfully!");
       setTimeout(() => {
         window.location.reload();
       }, 1500);

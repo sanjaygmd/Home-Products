@@ -46,16 +46,7 @@ const ProfileSettings = ({ user }) => {
       const res = await updateCustomer(user.customer_id, form);
       if (res.success) {
         setSuccess("Profile updated successfully!");
-        
-        // Update local storage so Navbar reflects changes
-        const currentAuth = JSON.parse(localStorage.getItem("auth"));
-        if (currentAuth) {
-          localStorage.setItem("auth", JSON.stringify({
-            ...currentAuth,
-            name: form.full_name,
-            profile_picture_url: form.profile_picture_url
-          }));
-        }
+
       } else {
         setError(res.message);
       }

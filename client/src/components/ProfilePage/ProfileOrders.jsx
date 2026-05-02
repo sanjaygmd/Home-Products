@@ -3,16 +3,17 @@ import { Package, CheckCircle, Clock } from "lucide-react";
 import Card from "./Card";
 import { getCustomerOrders } from "../../services/authService";
 import OrderDetailsModal from "./OrderDetailsModal";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const ProfileOrders = () => {
+  const { currentUser } = useAuth();
   const [orders, setOrders] = useState([]);
   const [status, setStatus] = useState("loading");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
 
   useEffect(() => {
-    const auth = JSON.parse(localStorage.getItem("auth"));
-    if (auth?.id) {
-      getCustomerOrders(auth.id).then((res) => {
+    if (currentUser?.id) {
+      getCustomerOrders(currentUser.id).then((res) => {
         if (res.success) {
           setOrders(res.data.map(order => ({
             id: order.order_id,
@@ -33,8 +34,10 @@ const ProfileOrders = () => {
           setStatus("error");
         }
       });
+    } else {
+      setStatus("error");
     }
-  }, []);
+  }, [currentUser]);
 
   const getStatus = (status) => {
     switch (status) {

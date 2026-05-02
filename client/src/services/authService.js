@@ -115,6 +115,7 @@ export const updateCustomer = async (id, updateData) => {
     };
   }
 };
+
 export const getCustomerAddresses = async (id) => {
   try {
     const res = await api.get(`/user/customer/addresses/${id}`);
@@ -125,4 +126,59 @@ export const getCustomerAddresses = async (id) => {
       message: error?.response?.data?.message || error.message,
     };
   }
+};
+
+export const logoutUser = async () => {
+    try {
+        const res = await api.post('/user/customer/logout');
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
+};
+
+// Admin Authentication Functions
+export const adminLogin = async (loginData) => {
+    try {
+        const res = await api.post('/user/admin/login', loginData);
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
+};
+
+export const adminRegister = async (registerData) => {
+    try {
+        const res = await api.post('/user/admin/register', registerData);
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
+};
+
+export const verifySuperAdminLogin = async (data) => {
+    try {
+        const res = await api.post('/user/admin/verify-super-admin-login', data);
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
+};
+
+export const requestAdminPasswordReset = async (email) => {
+    try {
+        const res = await api.post('/user/admin/request-password-reset', { email });
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
+};
+
+export const verifyAdminPasswordReset = async (data) => {
+    try {
+        const res = await api.post('/user/admin/verify-password-reset', data);
+        return res.data;
+    } catch (error) {
+        return { success: false, message: error?.response?.data?.message || error.message };
+    }
 };

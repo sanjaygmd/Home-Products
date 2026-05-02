@@ -33,6 +33,7 @@ export default function ReturnsPage() {
   const [returns, setReturns] = useState([]);
   const [selectedReturn, setSelectedReturn] = useState(null);
   const { toast } = useToast();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     fetchReturns();
@@ -55,8 +56,7 @@ export default function ReturnsPage() {
 
   const handleResolveReturn = async (id, status) => {
     try {
-      const auth = JSON.parse(localStorage.getItem("auth"));
-      const adminId = auth?.admin_id || auth?.id;
+      const adminId = currentUser?.id;
 
       const resp = await api.post(`/user/admin/returns/${id}/resolve`, { 
         status, 

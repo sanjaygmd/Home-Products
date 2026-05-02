@@ -62,6 +62,7 @@ const AdminStatCard = ({ title, value, change, changeType, icon: Icon, color, bg
 
 export default function DashboardHome() {
   const { searchQuery: search, setSearchQuery: setSearch } = useAdminSearch();
+  const { currentUser } = useAuth();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -101,7 +102,6 @@ export default function DashboardHome() {
     </div>
   );
 
-  const { currentUser } = useAuth();
   const stats = dashboardData?.stats || {};
   const admin = currentUser || { name: "Administrator" };
 

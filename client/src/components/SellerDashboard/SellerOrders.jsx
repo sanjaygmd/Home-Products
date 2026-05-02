@@ -6,8 +6,11 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerOrders = () => {
-  const seller = JSON.parse(localStorage.getItem("seller"));
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -16,11 +19,11 @@ const SellerOrders = () => {
   const [activeTab, setActiveTab] = useState("all");
 
   useEffect(() => {
-    if (!seller?.seller_id) return;
+    if (!sellerId) return;
 
     const fetchOrders = async () => {
       setLoading(true);
-      const res = await getSellerOrders(seller.seller_id);
+      const res = await getSellerOrders(sellerId);
       if (res.success) {
         setOrders(res.data);
       }
@@ -28,7 +31,7 @@ const SellerOrders = () => {
     };
 
     fetchOrders();
-  }, [seller?.seller_id]);
+  }, [sellerId]);
 
   const statusStyle = (status) => {
     switch (status?.toLowerCase()) {
@@ -209,7 +212,7 @@ const SellerOrders = () => {
             setSelectedOrderId(null);
             // Refresh orders list
             const fetchOrders = async () => {
-              const res = await getSellerOrders(seller.seller_id);
+              const res = await getSellerOrders(sellerId);
               if (res.success) {
                 setOrders(res.data);
               }

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { X, Package, MapPin, CreditCard, Clock, CheckCircle, Truck, AlertCircle, RotateCcw, Image as ImageIcon, Loader2 } from "lucide-react";
 import { getOrderDetails, cancelOrder, createReturnRequest } from "../../services/orderService";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
+  const { currentUser } = useAuth();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -38,10 +40,9 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
     }
     
     setCancelling(true);
-    const auth = JSON.parse(localStorage.getItem("auth"));
     
     try {
-      const res = await cancelOrder(orderId, auth?.id, cancelReason);
+      const res = await cancelOrder(orderId, currentUser?.id, cancelReason);
       if (res.success) {
         setOrder(prev => ({ ...prev, order_status: 'Cancelled', cancellation_reason: cancelReason }));
         setShowCancelConfirm(false);
@@ -69,13 +70,12 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
     }
 
     setReturning(true);
-    const auth = JSON.parse(localStorage.getItem("auth"));
 
     try {
       const res = await createReturnRequest({
         order_id: orderId,
         order_item_id: selectedItemForReturn.order_item_id,
-        customer_id: auth?.id,
+        customer_id: currentUser?.id,
         reason: returnReason,
         return_type: returnType,
         photos: [] // Placeholder for photos

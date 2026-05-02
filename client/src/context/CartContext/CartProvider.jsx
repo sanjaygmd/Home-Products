@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import emailjs from "@emailjs/browser";
 import { CartContext } from "./CartContext";
 import * as cartService from "../../services/cartService";
+import { useAuth } from "../AuthContext";
 
 export const CartProvider = ({ children }) => {
   const navigate = useNavigate();
@@ -11,11 +12,8 @@ export const CartProvider = ({ children }) => {
   // Track in-progress operations to prevent race conditions
   const pendingOps = useRef(new Set());
 
-  const getAuth = () => JSON.parse(localStorage.getItem("auth"));
-  const getCustomerId = () => {
-    const auth = getAuth();
-    return auth?.id || auth?.customer_id || auth?.admin_id || null;
-  };
+  const { currentUser } = useAuth();
+  const getCustomerId = () => currentUser?.id || null;
 
   const mapItem = (item) => ({
     cart_item_id: item.cart_item_id,
@@ -52,7 +50,7 @@ export const CartProvider = ({ children }) => {
     } finally {
       setCartLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     fetchCart();
@@ -93,12 +91,11 @@ export const CartProvider = ({ children }) => {
       await fetchCart();
 
       // Email notification (fire and forget)
-      const auth = getAuth();
       emailjs
         .send(
           import.meta.env.VITE_EMAILJS_SERVICE_ID,
           import.meta.env.VITE_EMAILJS_CART_TEMPLATE_ID,
-          { product_name: product.name, to_email: auth?.email },
+          { product_name: product.name, to_email: currentUser?.email },
           import.meta.env.VITE_EMAILJS_PUBLIC_KEY
         )
         .catch(() => {});

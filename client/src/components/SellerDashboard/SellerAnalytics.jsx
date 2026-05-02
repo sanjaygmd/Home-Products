@@ -17,8 +17,11 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerAnalytics = () => {
-  const seller = JSON.parse(localStorage.getItem("seller"));
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const [financeData, setFinanceData] = useState({
     daily: [],
     weekly: [],
@@ -28,25 +31,23 @@ const SellerAnalytics = () => {
     annual: []
   });
   const [selectedPeriod, setSelectedPeriod] = useState("daily");
-  const [orderData, setOrderData] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!seller?.seller_id) return;
+    if (!sellerId) return;
 
     const fetchData = async () => {
       setLoading(true);
       try {
-        const financeRes = await getSellerFinanceAnalytics(seller.seller_id);
-        const statsRes = await getSellerStats(seller.seller_id);
+        const financeRes = await getSellerFinanceAnalytics(sellerId);
+        const statsRes = await getSellerStats(sellerId);
 
         if (financeRes.success) {
           setFinanceData(financeRes.data);
         }
         if (statsRes.success) {
           setStats(statsRes.data.stats);
-          setOrderData(statsRes.data.orderData || []);
         }
       } catch (error) {
         console.error("Failed to fetch analytics data", error);
@@ -55,7 +56,7 @@ const SellerAnalytics = () => {
     };
 
     fetchData();
-  }, [seller?.seller_id]);
+  }, [sellerId]);
 
   if (loading) {
     return (

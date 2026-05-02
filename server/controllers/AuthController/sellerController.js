@@ -3,14 +3,15 @@ import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setS
 
 export const logoutSeller = async (req, res) => {
   try {
-    const { sessionId } = req.body;
+    const sessionId = req.sessionId;
     if (sessionId) {
       await invalidateSession(sessionId);
     }
-    res.clearCookie('token', { path: '/' });
-    res.clearCookie('admin_token', { path: '/' });
-    res.clearCookie('seller_token', { path: '/' });
-    res.clearCookie('customer_token', { path: '/' });
+    res.clearCookie('token', { path: '/', httpOnly: true });
+    res.clearCookie('admin_token', { path: '/', httpOnly: true });
+    res.clearCookie('seller_token', { path: '/', httpOnly: true });
+    res.clearCookie('customer_token', { path: '/', httpOnly: true });
+    res.clearCookie('super_admin_token', { path: '/', httpOnly: true });
     return res.status(200).json({ success: true, message: "Logout successful" });
 
   } catch (error) {
@@ -714,7 +715,7 @@ export const getSellerFinanceAnalytics = async (req, res) => {
         quarterly: quarterly.rows,
         halfYearly: halfYearly.rows,
         annual: annual.rows,
-        paymentMethods: paymentMethods.rows,
+        paymentMethods: paymentMethods,
         retentionRate: retentionRate
       }
     });

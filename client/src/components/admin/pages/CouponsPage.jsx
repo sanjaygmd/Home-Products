@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { getAllCoupons, createCoupon, updateCoupon, deleteCoupon } from '../../../services/couponService';
 import { card, buttonPrimary, buttonSecondary, input } from '../../../utils/UIStyles';
+import { useAuth } from '../../../context/AuthContext.jsx';
 
 const CouponsPage = () => {
+    const { currentUser } = useAuth();
     const [coupons, setCoupons] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -63,8 +65,7 @@ const CouponsPage = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const user = JSON.parse(localStorage.getItem('auth'));
-        const adminId = user?.admin_id || user?.id || user?.adminId;
+        const adminId = currentUser?.id;
         const payload = { ...formData, admin_id: adminId };
         
         const res = editingCoupon 
@@ -82,8 +83,7 @@ const CouponsPage = () => {
 
     const handleDelete = async (id) => {
         if (window.confirm('Are you sure you want to delete this coupon?')) {
-            const auth = JSON.parse(localStorage.getItem('auth'));
-            const res = await deleteCoupon(id, auth?.id);
+            const res = await deleteCoupon(id, currentUser?.id);
             if (res.success) {
                 fetchCoupons();
             } else {

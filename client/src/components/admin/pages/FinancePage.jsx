@@ -13,6 +13,7 @@ import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
 import { api } from "../../../services/api";
 import { updatePayoutStatus } from "../../../services/payoutService";
+import { useAuth } from "../../../context/AuthContext.jsx";
 
 const CHART_COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
 const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
@@ -43,6 +44,7 @@ const FinanceStatCard = ({ title, value, label, icon: Icon, color, change }) => 
 
 export default function FinancePage() {
   const [range, setRange] = useState('monthly');
+  const { currentUser } = useAuth();
   const handleDownloadReport = async () => {
     try {
       const year = new Date().getFullYear();
@@ -108,10 +110,9 @@ export default function FinancePage() {
 
     setActionLoading(true);
     try {
-      const adminId = JSON.parse(localStorage.getItem("admin"))?.id;
       const res = await updatePayoutStatus(selectedPayout.id, {
         status,
-        admin_id: adminId,
+        admin_id: currentUser?.id,
         transaction_ref: payoutForm.transaction_ref,
         notes: payoutForm.notes
       });

@@ -20,24 +20,11 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
         }
         
         if (req.cookies) {
-            // Prioritize by role if possible
-            if (allowedRoles.includes('admin') || allowedRoles.includes('super_admin')) {
-                if (req.cookies.admin_token) tokens.push(req.cookies.admin_token);
-            }
-            if (allowedRoles.includes('seller')) {
-                if (req.cookies.seller_token) tokens.push(req.cookies.seller_token);
-            }
-            if (allowedRoles.includes('customer')) {
-                if (req.cookies.customer_token) tokens.push(req.cookies.customer_token);
-            }
-            
-            // Add generic token as fallback
+            // Collect all known role-specific tokens
+            if (req.cookies.admin_token) tokens.push(req.cookies.admin_token);
+            if (req.cookies.seller_token) tokens.push(req.cookies.seller_token);
+            if (req.cookies.customer_token) tokens.push(req.cookies.customer_token);
             if (req.cookies.token) tokens.push(req.cookies.token);
-            
-            // Add others as final fallback
-            if (req.cookies.admin_token && !tokens.includes(req.cookies.admin_token)) tokens.push(req.cookies.admin_token);
-            if (req.cookies.seller_token && !tokens.includes(req.cookies.seller_token)) tokens.push(req.cookies.seller_token);
-            if (req.cookies.customer_token && !tokens.includes(req.cookies.customer_token)) tokens.push(req.cookies.customer_token);
         }
 
         // Filter out duplicates and nulls

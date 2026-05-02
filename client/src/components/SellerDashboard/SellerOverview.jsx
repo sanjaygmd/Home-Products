@@ -22,9 +22,12 @@ import AddIcon from '@mui/icons-material/Add';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import AlertTriangleIcon from '@mui/icons-material/Warning';
 
+import { useAuth } from "../../context/AuthContext.jsx";
+
 const SellerOverview = () => {
   const navigate = useNavigate();
-  const seller = JSON.parse(localStorage.getItem("seller"));
+  const { currentUser } = useAuth();
+  const sellerId = currentUser?.id;
   const [stats, setStats] = useState({
     total_products: 0,
     total_orders: 0,
@@ -40,13 +43,13 @@ const SellerOverview = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!seller?.seller_id) return;
+    if (!sellerId) return;
 
     const fetchData = async () => {
       setLoading(true);
       try {
-        const statsRes = await getSellerStats(seller.seller_id);
-        const graphRes = await getSellerDashboardData(seller.seller_id);
+        const statsRes = await getSellerStats(sellerId);
+        const graphRes = await getSellerDashboardData(sellerId);
 
         if (statsRes.success) {
           setStats(statsRes.data.stats);
@@ -66,7 +69,7 @@ const SellerOverview = () => {
     };
 
     fetchData();
-  }, [seller?.seller_id]);
+  }, [sellerId]);
 
   if (loading) {
     return (
@@ -114,7 +117,7 @@ const SellerOverview = () => {
             </div>
             <div>
               <h2 className="text-2xl md:text-4xl font-black text-white flex items-center gap-3 justify-center md:justify-start tracking-tight">
-                Welcome, {(seller?.name || seller?.store_name || seller?.full_name || "Seller").split(' ')[0]}! <VerifiedIcon className="text-blue-200" fontSize="medium" />
+              Welcome, {(currentUser?.name || currentUser?.store_name || 'Seller').split(' ')[0]}! <VerifiedIcon className="text-blue-200" fontSize="medium" />
               </h2>
               <p className="text-blue-100 mt-2 font-semibold text-lg opacity-90">
                 {stats.pending_orders > 0 

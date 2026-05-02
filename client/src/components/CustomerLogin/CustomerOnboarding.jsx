@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { customerOnboarding } from "../../services/authService";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const CustomerOnboarding = () => {
 
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
-  const auth = JSON.parse(localStorage.getItem("auth"));
-
-  const userId = auth?.id || auth?.customer_id;
+  const userId = currentUser?.id;
 
   const [form, setForm] = useState({
-    full_name: auth?.name || auth?.full_name || "",
-    phone: auth?.phone || "",
+    full_name: currentUser?.name || currentUser?.full_name || "",
+    phone: currentUser?.phone || "",
     address_line_1: "",
     address_line_2: "",
     city: "",

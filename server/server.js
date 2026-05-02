@@ -27,7 +27,14 @@ import { pruneExpiredRecords } from './utils/cleanupTask.js';
 const app = express();
 const port = process.env.PORT || 5000
 
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+            "img-src": ["'self'", "data:", "https://*.amazonaws.com", "https://via.placeholder.com", "https://images.unsplash.com"],
+        },
+    },
+}));
 app.use(cookieParser());
 
 
@@ -53,17 +60,20 @@ app.use(cors({
     credentials: true
 }));
 
-app.use((req, res, next) => {
-    const start = Date.now();
-    res.on('finish', () => {
-        const duration = Date.now() - start;
-        const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)\n`;
-        try {
-            fs.appendFileSync(path.join(process.cwd(), 'debug_requests.log'), entry);
-        } catch (e) {}
+// Request Logger (Development only)
+if (process.env.NODE_ENV !== 'production') {
+    app.use((req, res, next) => {
+        const start = Date.now();
+        res.on('finish', () => {
+            const duration = Date.now() - start;
+            const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)\n`;
+            try {
+                fs.appendFileSync(path.join(process.cwd(), 'debug_requests.log'), entry);
+            } catch (e) {}
+        });
+        next();
     });
-    next();
-});
+}
 
 // Rate Limiters
 const authLimiter = rateLimit({
@@ -122,9 +132,7 @@ app.listen(port, () => {
 })
 
 testDB()
-    .then(() => runSystemConfigMigration())
-    .then(() => fixSellerConstraints())
-    .then(() => pruneExpiredRecords()) // Run cleanup on startup
+    .then(() => pruneExpiredRecords()) // Safe, idempotent cleanup on startup
     .catch((err) => {
         console.error('DB error: ', err)
     })

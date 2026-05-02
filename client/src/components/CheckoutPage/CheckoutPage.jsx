@@ -1,6 +1,7 @@
 import React, { useState, useContext, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { CartContext } from "../../context/CartContext/CartContext";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 import PersonalDetails from "./PersonalDetails";
 import PaymentMethod from "./PaymentMethod";
@@ -11,15 +12,13 @@ const CheckoutPage = () => {
     const location = useLocation();
     const navigate = useNavigate();
   const { cart } = useContext(CartContext);
+  const { currentUser } = useAuth();
 
   useEffect(() => {
-    const seller = localStorage.getItem("seller");
-    const auth = localStorage.getItem("auth");
-
-    if (seller || !auth) {
+    if (!currentUser || currentUser.role !== 'customer') {
       navigate("/customer-login");
     }
-  }, [navigate]);
+  }, [currentUser, navigate]);
 
 
   const [step, setStep] = useState(1);

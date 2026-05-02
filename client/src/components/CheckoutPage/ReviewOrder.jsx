@@ -2,6 +2,7 @@ import { card, buttonSecondary } from "../../utils/UIStyles";
 import { useNavigate } from "react-router-dom";
 import emailjs from "emailjs-com";
 import { useContext, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
 import { CartContext } from "../../context/CartContext/CartContext";
 import { ProductContext } from "../../context/ProductContext/ProductContext";
 import { createOrder } from "../../services/orderService";
@@ -14,8 +15,8 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
   const { cart, fetchCart } = useContext(CartContext);
   const { fetchProducts } = useContext(ProductContext);
 
-  const user = JSON.parse(localStorage.getItem('auth'));
-  const isAdmin = user?.role === 'admin';
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const subtotalValue = items.reduce((acc, item) => acc + (item.discountPrice || item.price) * (item.quantity || 1), 0);
   const discountValue = appliedCoupon
@@ -25,7 +26,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
   const sendOrderEmail = (orderId) => {
     const templateParams = {
       customer_name: userDetails?.name,
-      customer_email: user?.email,
+      customer_email: currentUser?.email,
       phone: userDetails?.phone,
       address: `${userDetails?.address}, ${userDetails?.city}, ${userDetails?.state} - ${userDetails?.pincode}`,
       payment_method:
@@ -60,7 +61,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
     setIsPlacing(true);
     try {
       const orderData = {
-        customer_id: user.id || user.customer_id || user.admin_id,
+        customer_id: currentUser?.id,
         address_details: userDetails,
         items: items.map(item => {
           if (!item.seller_id) {
