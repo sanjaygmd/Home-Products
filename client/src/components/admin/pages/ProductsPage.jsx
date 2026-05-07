@@ -12,6 +12,7 @@ import { useState, useMemo, useEffect } from "react";
 import ProductViewModal from "../../common/ProductViewModal";
 import { cn } from "../../../lib/utils";
 import { api } from "../../../services/api";
+import { jsPDF } from "jspdf";
 
 const CHART_COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#ec4899', '#06b6d4'];
 
@@ -82,6 +83,128 @@ export default function ProductsPage() {
   useEffect(() => {
     fetchAdminProducts();
   }, []);
+
+  const handleExportCatalog = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Header block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("PRODUCT CATALOG REPORT", 14, 20);
+
+      // Subtitle / Date metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const currentDate = new Date().toLocaleDateString("en-IN", {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.text(`Generated on: ${currentDate}`, 14, 26);
+      doc.text(`Total SKU's: ${products.filter(p => !p.isVariant).length}`, 14, 31);
+
+      // Divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(14, 35, 196, 35);
+
+      // Table Headers
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("Product Details", 14, 43);
+      doc.text("Category", 95, 43);
+      doc.text("Price", 145, 43, { align: "right" });
+      doc.text("Stock", 170, 43, { align: "right" });
+      doc.text("Status", 196, 43, { align: "right" });
+
+      doc.line(14, 47, 196, 47);
+
+      // Render table rows
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      let yOffset = 54;
+      const baseProducts = products.filter(p => !p.isVariant);
+
+      baseProducts.forEach((product, idx) => {
+        // Handle multipage overflow dynamically
+        if (yOffset > 275) {
+          doc.addPage();
+          yOffset = 20;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(71, 85, 105);
+          doc.text("Product Details", 14, yOffset);
+          doc.text("Category", 95, yOffset);
+          doc.text("Price", 145, yOffset, { align: "right" });
+          doc.text("Stock", 170, yOffset, { align: "right" });
+          doc.text("Status", 196, yOffset, { align: "right" });
+          
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.5);
+          doc.line(14, yOffset + 4, 196, yOffset + 4);
+          
+          yOffset += 11;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(15, 23, 42);
+        }
+
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        // Title and SKU Details
+        const truncatedName = product.name?.length > 38 ? `${product.name.substring(0, 35)}...` : product.name;
+        doc.setFont("helvetica", "bold");
+        doc.text(truncatedName || "N/A", 14, yOffset);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184); // slate-400
+        const skuVal = product.sku || `ITEM-${product.id.split('-')[0].toUpperCase()}`;
+        doc.text(`SKU: ${skuVal}`, 14, yOffset + 3);
+
+        // Reset
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+
+        // Category column
+        doc.text(product.room || "General", 95, yOffset);
+
+        // Price column
+        const priceVal = `INR ${Number(product.price || 0).toLocaleString('en-IN')}`;
+        doc.text(priceVal, 145, yOffset, { align: "right" });
+
+        // Stock column
+        doc.text(String(product.stock), 170, yOffset, { align: "right" });
+
+        // Status column
+        const statusVal = getStatus(product);
+        doc.text(statusVal, 196, yOffset, { align: "right" });
+
+        yOffset += 11;
+      });
+
+      // Trigger standard local file download
+      doc.save(`Product_Catalog_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("Export catalog failed:", err);
+    }
+  };
 
   const getStatus = (product) => {
     if (!product.is_active) return "Inactive";
@@ -166,7 +289,10 @@ export default function ProductsPage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-4 w-full lg:w-auto justify-center">
-               <button className="h-16 px-10 rounded-[1.5rem] bg-white text-slate-950 text-xs font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl active:scale-95 flex items-center gap-3">
+               <button 
+                 onClick={handleExportCatalog}
+                 className="h-16 px-10 rounded-[1.5rem] bg-white text-slate-950 text-xs font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl active:scale-95 flex items-center gap-3"
+               >
                   <Download size={18} /> Export Catalog
                </button>
                <button 

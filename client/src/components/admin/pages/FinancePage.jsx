@@ -14,6 +14,7 @@ import { useToast } from "../../../hooks/use-toast";
 import { api } from "../../../services/api";
 import { updatePayoutStatus } from "../../../services/payoutService";
 import { useAuth } from "../../../context/AuthContext.jsx";
+import { jsPDF } from "jspdf";
 
 const CHART_COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
 const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
@@ -45,25 +46,217 @@ const FinanceStatCard = ({ title, value, label, icon: Icon, color, change }) => 
 export default function FinancePage() {
   const [range, setRange] = useState('monthly');
   const { currentUser } = useAuth();
-  const handleDownloadReport = async () => {
+  const handleDownloadReport = () => {
     try {
       const year = new Date().getFullYear();
-      
-      const resp = await api.get(`/user/admin/finance-report?year=${year}`, {
-        responseType: 'blob'
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
       });
-      
-      const blob = new Blob([resp.data], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Bank_Statement_${year}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      
-      toast({ title: "Report Downloaded", description: `Financial statement for ${year} is ready.` });
+
+      // Header block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("ANNUAL FINANCIAL LEDGER REPORT", 14, 20);
+
+      // Subtitle / Date metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const currentDate = new Date().toLocaleDateString("en-IN", {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.text(`Generated on: ${currentDate}`, 14, 26);
+      doc.text(`Fiscal Reporting Year: ${year}`, 14, 31);
+
+      // Divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(14, 35, 196, 35);
+
+      // Gross Summary metrics card highlights
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.rect(14, 40, 182, 32, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text("GROSS REVENUE", 20, 48);
+      doc.text("PLATFORM COMMISSION (10%)", 80, 48);
+      doc.text("NET PROFIT", 150, 48);
+
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42);
+      const grossVal = `INR ${Number(financeData.summary?.gross_revenue || 0).toLocaleString('en-IN')}`;
+      const commVal = `INR ${Number(financeData.summary?.platform_commission || 0).toLocaleString('en-IN')}`;
+      const netVal = `INR ${Number(financeData.summary?.net_profit || 0).toLocaleString('en-IN')}`;
+
+      doc.text(grossVal, 20, 58);
+      doc.text(commVal, 80, 58);
+      doc.setTextColor(139, 92, 246); // violet-500 for profit
+      doc.text(netVal, 150, 58);
+
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, 78, 196, 78);
+
+      // Monthly Breakdown Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text("MONTHLY PERFORMANCE BREAKDOWN", 14, 86);
+
+      // Monthly table headers
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("Month Period", 14, 95);
+      doc.text("Gross Sales", 65, 95, { align: "right" });
+      doc.text("Operational Costs", 115, 95, { align: "right" });
+      doc.text("Net Platform Profit", 165, 95, { align: "right" });
+      doc.text("Profitability", 196, 95, { align: "right" });
+
+      doc.line(14, 99, 196, 99);
+
+      // Render monthly rows
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      let yOffset = 106;
+
+      const items = Array.isArray(financeData.monthlyPL) ? financeData.monthlyPL : [];
+      items.forEach((item, idx) => {
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        // Period Month
+        doc.setFont("helvetica", "bold");
+        doc.text(item.name || "N/A", 14, yOffset);
+        doc.setFont("helvetica", "normal");
+
+        // Gross sales
+        const revStr = `INR ${Number(item.revenue || 0).toLocaleString('en-IN')}`;
+        doc.text(revStr, 65, yOffset, { align: "right" });
+
+        // Operational Costs
+        const costStr = `INR ${Number(item.costs || 0).toLocaleString('en-IN')}`;
+        doc.text(costStr, 115, yOffset, { align: "right" });
+
+        // Net Platform Profit
+        const profitStr = `INR ${Number(item.profit || 0).toLocaleString('en-IN')}`;
+        doc.text(profitStr, 165, yOffset, { align: "right" });
+
+        // Profitability Indicator
+        const statusStr = Number(item.profit || 0) >= 0 ? "PROFIT" : "LOSS";
+        doc.setFont("helvetica", "bold");
+        if (statusStr === "PROFIT") {
+          doc.setTextColor(16, 185, 129); // emerald-500
+        } else {
+          doc.setTextColor(239, 68, 68); // rose-500
+        }
+        doc.text(statusStr, 196, yOffset, { align: "right" });
+
+        // Reset
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(15, 23, 42);
+
+        yOffset += 10;
+      });
+
+      // Extra page for Recent Transaction Logs (if available)
+      const logs = Array.isArray(financeData.transactions) ? financeData.transactions : [];
+      if (logs.length > 0) {
+        doc.addPage();
+        let yOffsetLog = 20;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(15, 23, 42);
+        doc.text("RECENT LEDGER LOGS SUMMARY", 14, yOffsetLog);
+
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("Detailed transactional breakdown & partner payouts", 14, yOffsetLog + 6);
+
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, yOffsetLog + 11, 196, yOffsetLog + 11);
+
+        yOffsetLog += 20;
+
+        // Table headers for logs
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(71, 85, 105);
+        doc.text("Entry Date", 14, yOffsetLog);
+        doc.text("Seller Partner", 45, yOffsetLog);
+        doc.text("Ledger Type", 115, yOffsetLog);
+        doc.text("Transacted Amount", 196, yOffsetLog, { align: "right" });
+
+        doc.line(14, yOffsetLog + 4, 196, yOffsetLog + 4);
+        yOffsetLog += 11;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+
+        logs.forEach((log, logIdx) => {
+          if (yOffsetLog > 275) {
+            doc.addPage();
+            yOffsetLog = 20;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10);
+            doc.setTextColor(71, 85, 105);
+            doc.text("Entry Date", 14, yOffsetLog);
+            doc.text("Seller Partner", 45, yOffsetLog);
+            doc.text("Ledger Type", 115, yOffsetLog);
+            doc.text("Transacted Amount", 196, yOffsetLog, { align: "right" });
+
+            doc.setDrawColor(226, 232, 240);
+            doc.line(14, yOffsetLog + 4, 196, yOffsetLog + 4);
+            yOffsetLog += 11;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            doc.setTextColor(15, 23, 42);
+          }
+
+          // Alternating background fill
+          if (logIdx % 2 === 1) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(14, yOffsetLog - 5, 182, 8, "F");
+          }
+
+          doc.text(log.date || "N/A", 14, yOffsetLog);
+          doc.text(log.seller || "System / Platform", 45, yOffsetLog);
+          
+          doc.setFont("helvetica", "bold");
+          doc.text(log.type === 'payout' ? "PARTNER PAYOUT" : "CREDIT CHARGE", 115, yOffsetLog);
+          doc.setFont("helvetica", "normal");
+
+          const amtStr = `${log.type === 'payout' ? '-' : '+'}INR ${Number(log.amount || 0).toLocaleString('en-IN')}`;
+          if (log.type === 'payout') {
+            doc.setTextColor(239, 68, 68); // rose-500
+          } else {
+            doc.setTextColor(16, 185, 129); // emerald-500
+          }
+          doc.text(amtStr, 196, yOffsetLog, { align: "right" });
+          doc.setTextColor(15, 23, 42); // Reset
+
+          yOffsetLog += 10;
+        });
+      }
+
+      // Trigger standard local file download
+      doc.save(`Finance_Yearly_Report_${year}.pdf`);
+      toast({ title: "Report Downloaded", description: `Financial PDF statement for ${year} is ready.` });
     } catch (err) {
       console.error("Download report error:", err);
       toast({ title: "Download Failed", description: "Could not generate the yearly report.", variant: "destructive" });

@@ -20,6 +20,7 @@
     "emailjs-com": "^3.2.0",
     "framer-motion": "^12.38.0",
     "heic2any": "^0.0.4",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.8.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

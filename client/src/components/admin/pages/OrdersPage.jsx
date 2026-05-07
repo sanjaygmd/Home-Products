@@ -12,11 +12,13 @@ import {
 } from "recharts";
 import { cn } from "../../../lib/utils";
 import { api } from "../../../services/api";
+import { jsPDF } from "jspdf";
 
 const CHART_COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
 
 /* ─── Invoice download helper ──────────────────────────────────── */
 function downloadInvoice(order) {
+  const orderShortId = String(order.id).substring(0, 8).toUpperCase();
   const items = Array.isArray(order.items) ? order.items : [];
   const rows = items.map((it, i) => `
     <tr>
@@ -38,7 +40,7 @@ function downloadInvoice(order) {
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Invoice - ${order.id}</title>
+  <title>Invoice - ${orderShortId}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; color:#1a1a2e; background:#fff; padding:40px; }
@@ -76,7 +78,7 @@ function downloadInvoice(order) {
     </div>
     <div class="invoice-meta">
       <h2>TAX INVOICE</h2>
-      <p>Invoice #: INV-${order.id}</p>
+      <p>Invoice #: INV-${orderShortId}</p>
       <p>Date: ${new Date(order.created_at).toLocaleDateString()}</p>
       <p style="margin-top:6px"><span class="badge">PAID</span></p>
     </div>
@@ -90,7 +92,7 @@ function downloadInvoice(order) {
       </div>
       <div class="info-box">
         <h4>Order Info</h4>
-        <p>Order ID: <strong>#${order.id}</strong><br/>Payment: <strong>${order.payment_method}</strong></p>
+        <p>Order ID: <strong>#${orderShortId}</strong><br/>Payment: <strong>${order.payment_method}</strong></p>
       </div>
       <div class="info-box">
         <h4>Amount Summary</h4>
@@ -130,7 +132,7 @@ function downloadInvoice(order) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Invoice-${order.id}.html`;
+  a.download = `Invoice-${orderShortId}.html`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -171,6 +173,128 @@ export default function OrdersPage() {
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  const handleExportOrders = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Header block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("ORDERS SUMMARY REPORT", 14, 20);
+
+      // Subtitle / Date metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const currentDate = new Date().toLocaleDateString("en-IN", {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.text(`Generated on: ${currentDate}`, 14, 26);
+      doc.text(`Total Orders: ${orders.length}`, 14, 31);
+
+      // Divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(14, 35, 196, 35);
+
+      // Table Headers
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("Order ID", 14, 43);
+      doc.text("Customer Details", 45, 43);
+      doc.text("Amount", 115, 43, { align: "right" });
+      doc.text("Status", 145, 43, { align: "right" });
+      doc.text("Courier Logistics", 196, 43, { align: "right" });
+
+      doc.line(14, 47, 196, 47);
+
+      // Render table rows
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      let yOffset = 54;
+
+      filtered.forEach((order, idx) => {
+        // Handle multipage overflow dynamically
+        if (yOffset > 275) {
+          doc.addPage();
+          yOffset = 20;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(71, 85, 105);
+          doc.text("Order ID", 14, yOffset);
+          doc.text("Customer Details", 45, yOffset);
+          doc.text("Amount", 115, yOffset, { align: "right" });
+          doc.text("Status", 145, yOffset, { align: "right" });
+          doc.text("Courier Logistics", 196, yOffset, { align: "right" });
+          
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.5);
+          doc.line(14, yOffset + 4, 196, yOffset + 4);
+          
+          yOffset += 11;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(15, 23, 42);
+        }
+
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        // Order ID and Date
+        doc.setFont("helvetica", "bold");
+        const orderShortId = String(order.id).substring(0, 8).toUpperCase();
+        doc.text(`#${orderShortId}`, 14, yOffset);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184); // slate-400
+        const dateVal = new Date(order.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        doc.text(dateVal, 14, yOffset + 3);
+
+        // Reset
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+
+        // Customer Details
+        const truncatedCust = order.customer_name?.length > 32 ? `${order.customer_name.substring(0, 29)}...` : order.customer_name;
+        doc.text(truncatedCust || "N/A", 45, yOffset);
+
+        // Amount
+        const amountVal = `INR ${Number(order.total_amount || 0).toLocaleString('en-IN')}`;
+        doc.text(amountVal, 115, yOffset, { align: "right" });
+
+        // Status
+        doc.text(order.status, 145, yOffset, { align: "right" });
+
+        // Courier
+        const courierVal = order.courier || "Pending";
+        doc.text(courierVal, 196, yOffset, { align: "right" });
+
+        yOffset += 11;
+      });
+
+      // Trigger standard local file download
+      doc.save(`Order_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("Export orders failed:", err);
+    }
+  };
 
   const fetchOrders = async () => {
     setLoadingOrders(true);
@@ -399,7 +523,10 @@ export default function OrdersPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-4 w-full lg:w-auto justify-center">
-            <button className="h-16 px-10 rounded-[1.5rem] bg-white text-slate-950 text-xs font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl active:scale-95 flex items-center gap-3">
+            <button 
+              onClick={handleExportOrders}
+              className="h-16 px-10 rounded-[1.5rem] bg-white text-slate-950 text-xs font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl active:scale-95 flex items-center gap-3"
+            >
               <Download size={18} /> Export Data
             </button>
           </div>
@@ -516,7 +643,9 @@ export default function OrdersPage() {
                   </td>
                   <td className="px-6 py-10">
                     <div className="flex flex-col">
-                      <span className="text-xl font-black text-slate-950 tracking-tight group-hover/row:text-indigo-600 transition-colors">#{o.id}</span>
+                      <span className="text-xl font-black text-slate-950 tracking-tight group-hover/row:text-indigo-600 transition-colors" title={o.id}>
+                        #{o.id.length > 8 ? o.id.substring(0, 8).toUpperCase() : o.id.toUpperCase()}
+                      </span>
                       <span className="text-[11px] font-black text-slate-400 uppercase mt-2 tracking-widest flex items-center gap-2">
                         <Calendar size={12} /> {new Date(o.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                       </span>
@@ -591,7 +720,9 @@ export default function OrdersPage() {
                 </div>
                 <div>
                   <h2 className="text-3xl font-black text-slate-950 tracking-tight">Order Details</h2>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">Order ID: #{selectedOrder.id}</p>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1" title={selectedOrder.id}>
+                    Order ID: <span className="font-mono text-slate-900 select-all">#{selectedOrder.id.length > 8 ? selectedOrder.id.substring(0, 8).toUpperCase() : selectedOrder.id.toUpperCase()}</span>
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-4">

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { pool } from '../configs/db.js';
+import bcrypt from 'bcrypt';
 
 
 
@@ -41,17 +42,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
 
         // 2. Query all tokens at once
         const result = await pool.query(`
-            SELECT s.*, 
-                   CASE 
-                     WHEN s.user_type = 'customer' THEN (SELECT full_name FROM customers WHERE customer_id = s.user_ref_id)
-                     WHEN s.user_type = 'seller' THEN (SELECT full_name FROM sellers WHERE seller_id = s.user_ref_id)
-                     WHEN s.user_type IN ('admin', 'super_admin') THEN (SELECT name FROM admins WHERE admin_id = s.user_ref_id UNION SELECT name FROM super_admins WHERE super_admin_id = s.user_ref_id)
-                   END as name,
-                   CASE 
-                     WHEN s.user_type = 'customer' THEN (SELECT email FROM customers WHERE customer_id = s.user_ref_id)
-                     WHEN s.user_type = 'seller' THEN (SELECT email FROM sellers WHERE seller_id = s.user_ref_id)
-                     WHEN s.user_type IN ('admin', 'super_admin') THEN (SELECT email FROM admins WHERE admin_id = s.user_ref_id UNION SELECT email FROM super_admins WHERE super_admin_id = s.user_ref_id)
-                   END as email
+            SELECT s.*
             FROM auth_sessions s 
             WHERE s.token_hash = ANY($1) 
             AND s.is_blacklisted = false 
@@ -106,11 +97,42 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
             [session.session_id]
         );
 
+        // Fetch user name and email cleanly after token validation
+        let name = null;
+        let email = null;
+        const refId = session.user_ref_id;
+
+        if (session.user_type === 'customer') {
+            const userRes = await pool.query("SELECT full_name, email FROM customers WHERE customer_id = $1", [refId]);
+            if (userRes.rows.length > 0) {
+                name = userRes.rows[0].full_name;
+                email = userRes.rows[0].email;
+            }
+        } else if (session.user_type === 'seller') {
+            const userRes = await pool.query("SELECT full_name, email FROM sellers WHERE seller_id = $1", [refId]);
+            if (userRes.rows.length > 0) {
+                name = userRes.rows[0].full_name;
+                email = userRes.rows[0].email;
+            }
+        } else if (session.user_type === 'admin') {
+            const userRes = await pool.query("SELECT name, email FROM admins WHERE admin_id = $1", [refId]);
+            if (userRes.rows.length > 0) {
+                name = userRes.rows[0].name;
+                email = userRes.rows[0].email;
+            }
+        } else if (session.user_type === 'super_admin') {
+            const userRes = await pool.query("SELECT name, email FROM super_admins WHERE super_admin_id = $1", [refId]);
+            if (userRes.rows.length > 0) {
+                name = userRes.rows[0].name;
+                email = userRes.rows[0].email;
+            }
+        }
+
         const user = {
             id: session.user_ref_id,
             type: session.user_type,
-            email: session.email,
-            name: session.name
+            email: email,
+            name: name
         };
 
 
@@ -188,5 +210,89 @@ export const optionalAuth = async (req, res, next) => {
         next();
     } catch (error) {
         next();
+    }
+};
+
+/**
+ * Sudo Mode (re-authentication check)
+ */
+export const requireSudo = async (req, res, next) => {
+    try {
+        if (!req.user || !req.sessionId) {
+            return res.status(401).json({ success: false, message: "Authentication required" });
+        }
+
+        // 1. Check if the session was recently sudo-verified (within the last 15 minutes)
+        const sessRes = await pool.query(
+            "SELECT sudo_verified_at FROM auth_sessions WHERE session_id = $1",
+            [req.sessionId]
+        );
+
+        const SUDO_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+        if (sessRes.rows.length > 0) {
+            const sudoVerifiedAt = new Date(sessRes.rows[0].sudo_verified_at || 0).getTime();
+            if (Date.now() - sudoVerifiedAt <= SUDO_TIMEOUT_MS) {
+                return next(); // Still in Sudo mode
+            }
+        }
+
+        // 2. Not in Sudo mode. Look for password in request body or headers
+        const password = req.body.sudoPassword || req.body.password || req.headers['x-sudo-password'];
+
+        if (!password) {
+            return res.status(401).json({ 
+                success: false, 
+                sudo_required: true, 
+                message: "Confirm your password to continue this high-privilege action." 
+            });
+        }
+
+        // 3. Retrieve user's password hash from database
+        let table = '';
+        let idCol = '';
+        if (req.user.type === 'customer') {
+            table = 'customers';
+            idCol = 'customer_id';
+        } else if (req.user.type === 'seller') {
+            table = 'sellers';
+            idCol = 'seller_id';
+        } else if (req.user.type === 'admin') {
+            table = 'admins';
+            idCol = 'admin_id';
+        } else if (req.user.type === 'super_admin') {
+            table = 'super_admins';
+            idCol = 'super_admin_id';
+        }
+
+        const userRes = await pool.query(`SELECT password_hash FROM ${table} WHERE ${idCol} = $1`, [req.user.id]);
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const passwordHash = userRes.rows[0].password_hash;
+        
+        let isMatch = false;
+        const isBcrypt = passwordHash && (passwordHash.startsWith('$2a$') || passwordHash.startsWith('$2b$') || passwordHash.startsWith('$2y$'));
+        if (isBcrypt) {
+            isMatch = await bcrypt.compare(password, passwordHash);
+        } else {
+            const legacyMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, passwordHash]);
+            isMatch = !!legacyMatch.rows[0]?.match;
+        }
+
+        if (!isMatch) {
+            return res.status(401).json({ success: false, message: "Invalid password confirmation." });
+        }
+
+        // 4. Update sudo_verified_at in session to refresh Sudo Mode
+        await pool.query(
+            "UPDATE auth_sessions SET sudo_verified_at = NOW() WHERE session_id = $1",
+            [req.sessionId]
+        );
+
+        next();
+    } catch (err) {
+        console.error("SUDO MIDDLEWARE ERROR:", err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };

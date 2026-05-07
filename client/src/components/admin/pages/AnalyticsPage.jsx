@@ -12,6 +12,7 @@ import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
 import { api } from "../../../services/api";
 import { useNavigate } from "react-router-dom";
+import { jsPDF } from "jspdf";
 
 const RANGES = [
   { id: 'daily', label: 'Daily' },
@@ -63,7 +64,233 @@ export default function AnalyticsPage() {
   ];
 
   const handleExport = () => {
-    toast({ title: "Report Generated", description: "Your analytics report has been downloaded." });
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Header block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("BUSINESS INTELLIGENCE REPORT", 14, 20);
+
+      // Subtitle / Date metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const currentDate = new Date().toLocaleDateString("en-IN", {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.text(`Generated on: ${currentDate}`, 14, 26);
+      doc.text(`Intelligence Metric Scope: ${String(range).toUpperCase()}`, 14, 31);
+
+      // Divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(14, 35, 196, 35);
+
+      // Stats card highlights panel
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.rect(14, 40, 182, 32, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text("GROSS SALES", 20, 48);
+      doc.text("TOTAL PACKETS", 65, 48);
+      doc.text("SHIPPED UNITS", 110, 48);
+      doc.text("AVG ORDER VALUE", 155, 48);
+
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      const grossVal = `INR ${Number(totalRevenue || 0).toLocaleString('en-IN')}`;
+      const ordersVal = String(totalOrders || 0);
+      const itemsVal = String(totalItems || 0);
+      const avgVal = `INR ${Math.round(avgOrderValue || 0).toLocaleString('en-IN')}`;
+
+      doc.text(grossVal, 20, 58);
+      doc.text(ordersVal, 65, 58);
+      doc.text(itemsVal, 110, 58);
+      doc.setTextColor(99, 102, 241); // indigo-500
+      doc.text(avgVal, 155, 58);
+
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, 78, 196, 78);
+
+      // Section 1: Product Category Performance
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text("PRODUCT CATEGORY PERFORMANCE BREAKDOWN", 14, 86);
+
+      // Table headers for category sales
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Category Classification", 14, 95);
+      doc.text("Revenue Contribution (INR)", 196, 95, { align: "right" });
+
+      doc.line(14, 99, 196, 99);
+
+      // Category Sales rows
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      let yOffset = 106;
+
+      const catSales = Array.isArray(analytics.categorySales) ? analytics.categorySales : [];
+      catSales.forEach((cat, idx) => {
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.text(cat.category || "N/A", 14, yOffset);
+        doc.setFont("helvetica", "normal");
+
+        const revStr = `INR ${Number(cat.revenue || 0).toLocaleString('en-IN')}`;
+        doc.text(revStr, 196, yOffset, { align: "right" });
+
+        yOffset += 11;
+      });
+
+      // Section 2: Catalog Inventory Distribution Split
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CATALOG INVENTORY DISTRIBUTION SPLIT", 14, yOffset + 5);
+
+      yOffset += 14;
+
+      // Table headers for category distribution
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Category Classification", 14, yOffset);
+      doc.text("Active Unique SKUs", 196, yOffset, { align: "right" });
+
+      doc.line(14, yOffset + 4, 196, yOffset + 4);
+      yOffset += 11;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      const catDist = Array.isArray(analytics.categoryDistribution) ? analytics.categoryDistribution : [];
+      catDist.forEach((dist, idx) => {
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.text(dist.name || "N/A", 14, yOffset);
+        doc.setFont("helvetica", "normal");
+
+        doc.text(String(dist.value || 0), 196, yOffset, { align: "right" });
+
+        yOffset += 11;
+      });
+
+      // Extra Page: Logistics Fulfillment Deliveries
+      const deliveries = Array.isArray(analytics.recentDeliveries) ? analytics.recentDeliveries : [];
+      if (deliveries.length > 0) {
+        doc.addPage();
+        let yOffsetLog = 20;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.setTextColor(15, 23, 42);
+        doc.text("LOGISTICS & SHIPMENT INTEL SUMMARY", 14, yOffsetLog);
+
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("Real-time synchronization log of platform dispatch courier tracking", 14, yOffsetLog + 6);
+
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, yOffsetLog + 11, 196, yOffsetLog + 11);
+
+        yOffsetLog += 20;
+
+        // Table headers for logistics tracking
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(71, 85, 105);
+        doc.text("Order ID Reference", 14, yOffsetLog);
+        doc.text("Recipient Client", 50, yOffsetLog);
+        doc.text("Courier Channel", 95, yOffsetLog);
+        doc.text("Fulfillment Status", 155, yOffsetLog);
+        doc.text("Delivered At Date", 196, yOffsetLog, { align: "right" });
+
+        doc.line(14, yOffsetLog + 4, 196, yOffsetLog + 4);
+        yOffsetLog += 11;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+
+        deliveries.forEach((d, dIdx) => {
+          if (yOffsetLog > 275) {
+            doc.addPage();
+            yOffsetLog = 20;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10);
+            doc.setTextColor(71, 85, 105);
+            doc.text("Order ID Reference", 14, yOffsetLog);
+            doc.text("Recipient Client", 50, yOffsetLog);
+            doc.text("Courier Channel", 95, yOffsetLog);
+            doc.text("Fulfillment Status", 155, yOffsetLog);
+            doc.text("Delivered At Date", 196, yOffsetLog, { align: "right" });
+
+            doc.setDrawColor(226, 232, 240);
+            doc.line(14, yOffsetLog + 4, 196, yOffsetLog + 4);
+            yOffsetLog += 11;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            doc.setTextColor(15, 23, 42);
+          }
+
+          // Alternating background fill
+          if (dIdx % 2 === 1) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(14, yOffsetLog - 5, 182, 8, "F");
+          }
+
+          const orderIdShort = String(d.order_id).substring(0, 8).toUpperCase();
+          doc.setFont("helvetica", "bold");
+          doc.text(`#${orderIdShort}`, 14, yOffsetLog);
+          doc.setFont("helvetica", "normal");
+
+          const clientName = d.customer_name?.length > 18 ? `${d.customer_name.substring(0, 15)}...` : d.customer_name;
+          doc.text(clientName || "N/A", 50, yOffsetLog);
+          
+          doc.text(`${d.courier_name || 'N/A'} (${d.awb_code || '—'})`, 95, yOffsetLog);
+          doc.text(d.shipping_status || "Pending", 155, yOffsetLog);
+          
+          const delDate = d.delivered_at ? new Date(d.delivered_at).toLocaleDateString('en-IN') : '—';
+          doc.text(delDate, 196, yOffsetLog, { align: "right" });
+
+          yOffsetLog += 10;
+        });
+      }
+
+      // Trigger standard local file download
+      doc.save(`Business_Intelligence_Report_${range}.pdf`);
+      toast({ title: "Report Downloaded", description: "Intelligence report has been downloaded successfully." });
+    } catch (err) {
+      console.error("Export intelligence failed:", err);
+      toast({ title: "Export Failed", description: "Could not compile the business intelligence report.", variant: "destructive" });
+    }
   };
 
   return (

@@ -14,19 +14,19 @@ import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP, sendAdminPasswordR
 import { isPasswordStrong } from "../../utils/validation.js";
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 
 const generateSecureOTP = () => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
 const saveOtp = async (email, type, otp, expires, metadata = {}) => {
+  const hashedOtp = await bcrypt.hash(otp, 12);
   await pool.query(
     `INSERT INTO persistent_otps (email, otp_type, otp_code, attempts, expires_at, metadata)
      VALUES ($1, $2, $3, 0, $4, $5)
      ON CONFLICT (email, otp_type) 
      DO UPDATE SET otp_code = $3, attempts = 0, expires_at = $4, metadata = $5, created_at = NOW()`,
-    [email, type, otp, new Date(expires), JSON.stringify(metadata)]
+    [email, type, hashedOtp, new Date(expires), JSON.stringify(metadata)]
   );
 };
 
@@ -90,21 +90,26 @@ export const registerAdmin = async (req, res) => {
     const keyRes = await pool.query("SELECT master_key FROM super_admins LIMIT 1");
     const EXPECTED_MASTER_KEY = keyRes.rows[0]?.master_key || process.env.MASTER_SECURITY_KEY;
 
-    if (hasUsers) {
-      let isMasterKeyValid = false;
-      const isExpectedBcrypt = EXPECTED_MASTER_KEY && (EXPECTED_MASTER_KEY.startsWith('$2a$') || EXPECTED_MASTER_KEY.startsWith('$2b$') || EXPECTED_MASTER_KEY.startsWith('$2y$'));
-      if (isExpectedBcrypt) {
-        isMasterKeyValid = await bcrypt.compare(masterKey, EXPECTED_MASTER_KEY);
-      } else {
-        isMasterKeyValid = (masterKey === EXPECTED_MASTER_KEY);
-      }
+    if (!EXPECTED_MASTER_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: "Server Configuration Error: MASTER_SECURITY_KEY is not configured on the server."
+      });
+    }
 
-      if (!masterKey || !isMasterKeyValid) {
-        return res.status(403).json({
-          success: false,
-          message: `Administrative registration for ${type} is restricted. Please provide a valid Master Security Key.`
-        });
-      }
+    let isMasterKeyValid = false;
+    const isExpectedBcrypt = EXPECTED_MASTER_KEY && (EXPECTED_MASTER_KEY.startsWith('$2a$') || EXPECTED_MASTER_KEY.startsWith('$2b$') || EXPECTED_MASTER_KEY.startsWith('$2y$'));
+    if (isExpectedBcrypt) {
+      isMasterKeyValid = await bcrypt.compare(masterKey || '', EXPECTED_MASTER_KEY);
+    } else {
+      isMasterKeyValid = (masterKey === EXPECTED_MASTER_KEY);
+    }
+
+    if (!masterKey || !isMasterKeyValid) {
+      return res.status(403).json({
+        success: false,
+        message: `Administrative registration for ${type} is restricted. Please provide a valid Master Security Key.`
+      });
     }
 
     const existing = await pool.query(`SELECT ${idCol} FROM ${table} WHERE email = $1`, [email]);
@@ -113,7 +118,7 @@ export const registerAdmin = async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const masterKeyToStore = await bcrypt.hash(masterKey || process.env.MASTER_SECURITY_KEY || 'default_master_key_999', 12);
+    const masterKeyToStore = await bcrypt.hash(masterKey, 12);
     
     const result = await pool.query(
       `INSERT INTO ${table} 
@@ -139,7 +144,7 @@ export const registerAdmin = async (req, res) => {
       is_super_admin: type === 'super_admin'
     });
 
-    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+    setSessionCookie(res, type, session.token);
 
     return res.status(201).json({
       success: true,
@@ -176,6 +181,7 @@ export const loginAdmin = async (req, res) => {
     const table = type === 'super_admin' ? 'super_admins' : 'admins';
     const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
 
+    const result = await pool.query(`SELECT * FROM ${table} WHERE email = $1`, [email]);
     if (result.rows.length === 0) {
       return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
@@ -241,7 +247,7 @@ export const loginAdmin = async (req, res) => {
       is_super_admin: type === 'super_admin'
     });
 
-    setSessionCookie(res, typeof type !== 'undefined' ? type : 'admin', session.token);
+    setSessionCookie(res, type, session.token);
 
 
 
@@ -291,7 +297,8 @@ export const verifySuperAdminLogin = async (req, res) => {
       return res.status(403).json({ success: false, message: "Too many verification attempts. Please log in again." });
     }
 
-    if (loginData.otp !== otp) {
+    const isOtpValid = await bcrypt.compare(otp, loginData.otp);
+    if (!isOtpValid) {
       await incrementOtpAttempts(email, 'super_admin_2fa');
       const attemptsLeft = 5 - (loginData.attempts + 1);
       return res.status(400).json({ success: false, message: `Invalid verification code. ${attemptsLeft} attempts remaining.` });
@@ -516,7 +523,8 @@ export const verifyAdminPasswordReset = async (req, res) => {
       return res.status(403).json({ success: false, message: "Too many verification attempts. Please request a new code." });
     }
 
-    if (resetData.otp !== otp) {
+    const isOtpValid = await bcrypt.compare(otp, resetData.otp);
+    if (!isOtpValid) {
       await incrementOtpAttempts(email, 'admin_reset_otp');
       const attemptsLeft = 5 - (resetData.attempts + 1);
       return res.status(400).json({ success: false, message: `Invalid verification code. ${attemptsLeft} attempts remaining.` });
@@ -1659,7 +1667,7 @@ export const changeAdminPassword = async (req, res) => {
 
     const token = jwt.sign(
       { id, email, table, idCol, purpose: 'admin_password_reset' },
-      process.env.JWT_SECRET || 'gmd_secret_key_999',
+      process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -2170,7 +2178,7 @@ export const resetPasswordViaLink = async (req, res) => {
     // Verify JWT
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'gmd_secret_key_999');
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(400).json({ success: false, message: "Invalid or expired password reset link." });
     }
@@ -2180,6 +2188,11 @@ export const resetPasswordViaLink = async (req, res) => {
     }
 
     const { id, email, table, idCol } = decoded;
+
+    const ALLOWED = { admins: 'admin_id', super_admins: 'super_admin_id' };
+    if (!ALLOWED[table] || ALLOWED[table] !== idCol) {
+      return res.status(400).json({ success: false, message: "Invalid token parameters." });
+    }
 
     // Check account exists
     const checkRes = await pool.query(`SELECT name FROM ${table} WHERE ${idCol} = $1 AND email = $2`, [id, email]);

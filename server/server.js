@@ -1,15 +1,26 @@
 import dotenv from 'dotenv';
 dotenv.config();
+
+// Critical Environment Validations
+if (!process.env.JWT_SECRET) {
+  console.error("FATAL CONFIGURATION ERROR: JWT_SECRET environment variable is missing!");
+  process.exit(1);
+}
+if (!process.env.MASTER_SECURITY_KEY) {
+  console.error("FATAL CONFIGURATION ERROR: MASTER_SECURITY_KEY environment variable is missing!");
+  process.exit(1);
+}
+
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import twilio from 'twilio';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
 import { testDB } from './configs/db.js';
+import { runSchemaMigrations } from './configs/migrations.js';
 import authRoutes from './routes/AuthRoutes.js';
 import couponRoutes from './routes/CouponRoutes.js';
 import payoutRoutes from './routes/PayoutRoutes.js';
@@ -50,7 +61,7 @@ app.use(cors({
             'http://127.0.0.1:5174'
         ];
         // Only allow undefined origin (non-browser requests) in development
-        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || (origin === undefined && process.env.NODE_ENV !== 'production');
+        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || (origin === undefined && process.env.NODE_ENV === 'development');
         
         if (isAllowed) {
             callback(null, true);
@@ -143,7 +154,8 @@ app.listen(port, () => {
 })
 
 testDB()
+    .then(() => runSchemaMigrations()) // Run decoupled schema migrations
     .then(() => pruneExpiredRecords()) // Safe, idempotent cleanup on startup
     .catch((err) => {
-        console.error('DB error: ', err)
+        console.error('Database initialization error: ', err)
     })

@@ -68,7 +68,7 @@ import {
   resetPasswordViaLink } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
-import { verifyToken, requireAuth, optionalAuth } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAuth, optionalAuth, requireSudo } from '../middlewares/authMiddleware.js';
 
 const authRoutes = express.Router();
 
@@ -131,16 +131,16 @@ authRoutes.get('/admin/returns', requireAuth(['admin', 'super_admin']), getAllRe
 authRoutes.post('/admin/returns/:id/resolve', requireAuth(['admin', 'super_admin']), resolveReturnRequest);
 authRoutes.patch('/admin/customer/:id/status', requireAuth(['admin', 'super_admin']), toggleCustomerStatus);
 authRoutes.patch('/admin/seller/:id/status', requireAuth(['admin', 'super_admin']), toggleSellerStatus);
-authRoutes.delete('/admin/seller/:id', requireAuth(['admin', 'super_admin']), deleteSeller);
+authRoutes.delete('/admin/seller/:id', requireAuth(['admin', 'super_admin']), requireSudo, deleteSeller);
 authRoutes.get('/admin/audit-logs', requireAuth(['admin', 'super_admin']), getAuditLogs);
-authRoutes.put('/admin/change-password/:id', requireAuth(['admin', 'super_admin']), changeAdminPassword);
-authRoutes.put('/admin/update-password-self', requireAuth(['admin', 'super_admin']), updateAdminPasswordSelf);
+authRoutes.put('/admin/change-password/:id', requireAuth(['admin', 'super_admin']), requireSudo, changeAdminPassword);
+authRoutes.put('/admin/update-password-self', requireAuth(['admin', 'super_admin']), requireSudo, updateAdminPasswordSelf);
 authRoutes.put('/admin/profile/:id', requireAuth(['admin', 'super_admin']), updateAdminProfile);
 
 // Super Admin Routes (Admin Management)
 authRoutes.get('/super-admin/administrators', requireAuth(['super_admin']), getAllAdministrators);
 authRoutes.patch('/super-admin/administrator/:id/status', requireAuth(['super_admin']), updateAdminStatus);
-authRoutes.delete('/super-admin/administrator/:id', requireAuth(['super_admin']), deleteAdministrator);
+authRoutes.delete('/super-admin/administrator/:id', requireAuth(['super_admin']), requireSudo, deleteAdministrator);
 authRoutes.put('/super-admin/master-key', requireAuth(['super_admin']), updateMasterKey);
 
 // Admin Settings & Dynamic Notifications

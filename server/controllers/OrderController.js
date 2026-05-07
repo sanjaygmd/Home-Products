@@ -174,7 +174,7 @@ export const createOrder = async (req, res) => {
     const final_tax_amount = Math.round(serverCalculatedSubtotal * 0.05); // 5% Tax
     const final_platform_fee = 10;
     const final_cod_fee = payment_method === 'cod' ? 50 : 0;
-    const final_shipping = Math.max(0, parseFloat(shipping_charges || 0));
+    const final_shipping = serverCalculatedSubtotal > 1000 ? 0 : 40;
     const final_total_amount = serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount;
 
     // 6. Insert into orders

@@ -3,12 +3,13 @@ import { Button } from "../../ui/button";
 import { 
   Search, RotateCcw, AlertTriangle, CheckCircle, 
   XCircle, Banknote, ListCollapse, Clock, ShieldAlert,
-  Eye, X, ArrowUpRight, Package, Loader2
+  Eye, X, ArrowUpRight, Package, Loader2, Download
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
 import { api } from "../../../services/api";
 import { useAuth } from "../../../context/AuthContext.jsx";
+import { jsPDF } from "jspdf";
 
 
 const ReturnStatCard = ({ title, value, label, icon: Icon, color }) => (
@@ -44,6 +45,128 @@ export default function ReturnsPage() {
   useEffect(() => {
     fetchReturns();
   }, []);
+
+  const handleExportReturns = () => {
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // Header block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("RETURNS & DISPUTES REPORT", 14, 20);
+
+      // Subtitle / Date metadata
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const currentDate = new Date().toLocaleDateString("en-IN", {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.text(`Generated on: ${currentDate}`, 14, 26);
+      doc.text(`Total Return Requests: ${returns.length}`, 14, 31);
+
+      // Divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(14, 35, 196, 35);
+
+      // Table Headers
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // slate-600
+      doc.text("Return ID", 14, 43);
+      doc.text("Customer Profile", 45, 43);
+      doc.text("Reason for Return", 100, 43);
+      doc.text("Refund Amount", 155, 43, { align: "right" });
+      doc.text("Status", 196, 43, { align: "right" });
+
+      doc.line(14, 47, 196, 47);
+
+      // Render table rows
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+
+      let yOffset = 54;
+
+      filteredReturns.forEach((ret, idx) => {
+        // Handle multipage overflow dynamically
+        if (yOffset > 275) {
+          doc.addPage();
+          yOffset = 20;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(71, 85, 105);
+          doc.text("Return ID", 14, yOffset);
+          doc.text("Customer Profile", 45, yOffset);
+          doc.text("Reason for Return", 100, yOffset);
+          doc.text("Refund Amount", 155, yOffset, { align: "right" });
+          doc.text("Status", 196, yOffset, { align: "right" });
+          
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.5);
+          doc.line(14, yOffset + 4, 196, yOffset + 4);
+          
+          yOffset += 11;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(15, 23, 42);
+        }
+
+        // Alternating background fill
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yOffset - 5, 182, 8, "F");
+        }
+
+        // Return ID
+        doc.setFont("helvetica", "bold");
+        const returnShortId = String(ret.id).substring(0, 8).toUpperCase();
+        doc.text(`#${returnShortId}`, 14, yOffset);
+        
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184); // slate-400
+        const orderShortId = String(ret.orderId).split('-')[0].substring(0, 8).toUpperCase();
+        doc.text(`Order: #${orderShortId}`, 14, yOffset + 3);
+
+        // Reset
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+
+        // Customer Details
+        const truncatedCust = ret.customer?.length > 20 ? `${ret.customer.substring(0, 17)}...` : ret.customer;
+        doc.text(truncatedCust || "N/A", 45, yOffset);
+
+        // Reason
+        const truncatedReason = ret.reason?.length > 24 ? `${ret.reason.substring(0, 21)}...` : ret.reason;
+        doc.text(truncatedReason || "N/A", 100, yOffset);
+
+        // Amount
+        doc.text(ret.amount, 155, yOffset, { align: "right" });
+
+        // Status
+        doc.text(ret.status, 196, yOffset, { align: "right" });
+
+        yOffset += 11;
+      });
+
+      // Trigger standard local file download
+      doc.save(`Returns_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error("Export returns failed:", err);
+    }
+  };
 
   const fetchReturns = async () => {
     setLoading(true);
@@ -121,6 +244,14 @@ export default function ReturnsPage() {
           <h1 className="text-4xl font-black text-slate-950 tracking-tight">Returns</h1>
           <p className="text-slate-500 font-bold mt-2 text-sm">Manage customer return requests and refunds</p>
         </div>
+        <div className="flex flex-wrap gap-4 w-full md:w-auto justify-end">
+          <button 
+            onClick={handleExportReturns}
+            className="h-14 px-8 rounded-2xl bg-white text-slate-950 text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-md hover:shadow-xl active:scale-95 border border-slate-100 flex items-center gap-3"
+          >
+            <Download size={18} /> Export Data
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -169,10 +300,12 @@ export default function ReturnsPage() {
                   <tr key={r.id} className="hover:bg-slate-50/50 transition-colors group">
                     <td className="pl-10 pr-6 py-7">
                       <div className="flex flex-col">
-                        <span className="font-mono text-[10px] font-black text-rose-600 bg-rose-50 px-2.5 py-1.5 rounded-xl border border-rose-100 w-fit">
-                          #{r.id}
+                        <span className="font-mono text-[10px] font-black text-rose-600 bg-rose-50 px-2.5 py-1.5 rounded-xl border border-rose-100 w-fit" title={r.id}>
+                          #{r.id.length > 8 ? r.id.substring(0, 8).toUpperCase() : r.id.toUpperCase()}
                         </span>
-                        <span className="text-[10px] font-black text-slate-400 mt-2 uppercase tracking-widest">Order: {r.orderId.split('-')[0]}</span>
+                        <span className="text-[10px] font-black text-slate-400 mt-2 uppercase tracking-widest" title={r.orderId}>
+                          Order: #{r.orderId.length > 8 ? r.orderId.substring(0, 8).toUpperCase() : r.orderId.toUpperCase()}
+                        </span>
                       </div>
                     </td>
                     <td className="px-6 py-7">
@@ -245,7 +378,9 @@ export default function ReturnsPage() {
               <div className="flex justify-between items-start mb-12">
                 <div>
                   <h2 className="text-4xl font-black text-slate-950 tracking-tight mb-2">{selectedReturn.amount}</h2>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Return ID: <span className="text-slate-900 font-mono">#{selectedReturn.id}</span></p>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]" title={selectedReturn.id}>
+                    Return ID: <span className="text-slate-900 font-mono select-all">#{selectedReturn.id.length > 8 ? selectedReturn.id.substring(0, 8).toUpperCase() : selectedReturn.id.toUpperCase()}</span>
+                  </p>
                 </div>
                 <div className={cn(
                   "px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] border shadow-sm",
@@ -257,7 +392,7 @@ export default function ReturnsPage() {
 
               <div className="grid grid-cols-2 gap-6 mb-12">
                 {[
-                  { icon: Package, label: "Order Reference", value: `#${selectedReturn.orderId.split('-')[0]}`, color: "text-violet-600", bg: "bg-violet-50" },
+                  { icon: Package, label: "Order Reference", value: `#${selectedReturn.orderId.length > 8 ? selectedReturn.orderId.substring(0, 8).toUpperCase() : selectedReturn.orderId.toUpperCase()}`, color: "text-violet-600", bg: "bg-violet-50" },
                   { icon: ShieldAlert, label: "Return Reason", value: selectedReturn.reason, color: "text-rose-600", bg: "bg-rose-50" },
                   { icon: Clock, label: "Requested On", value: selectedReturn.date, color: "text-blue-600", bg: "bg-blue-50" },
                   { icon: RotateCcw, label: "Logistics Type", value: "Standard Pickup", color: "text-emerald-600", bg: "bg-emerald-50" }
