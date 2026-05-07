@@ -5,7 +5,7 @@ export const getCustomerNotifications = async (req, res) => {
     const { customerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== customerId && req.user.type !== 'admin') {
+    if (req.user.id !== customerId && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: "Unauthorized access to notifications" });
     }
 
@@ -32,7 +32,7 @@ export const markAsRead = async (req, res) => {
         }
 
         const note = noteCheck.rows[0];
-        if (req.user.id !== note.customer_id && req.user.id !== note.seller_id && req.user.type !== 'admin') {
+        if (req.user.id !== note.customer_id && req.user.id !== note.seller_id && !['admin', 'super_admin'].includes(req.user.type)) {
             return res.status(403).json({ success: false, message: "Unauthorized" });
         }
 
@@ -52,7 +52,7 @@ export const markAllAsRead = async (req, res) => {
     const { customerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== customerId && req.user.type !== 'admin') {
+    if (req.user.id !== customerId && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
@@ -79,7 +79,7 @@ export const deleteNotification = async (req, res) => {
         }
 
         const note = noteCheck.rows[0];
-        if (req.user.id !== note.customer_id && req.user.id !== note.seller_id && req.user.type !== 'admin') {
+        if (req.user.id !== note.customer_id && req.user.id !== note.seller_id && !['admin', 'super_admin'].includes(req.user.type)) {
             return res.status(403).json({ success: false, message: "Unauthorized" });
         }
 

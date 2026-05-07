@@ -334,7 +334,7 @@ export const getOrderById = async (req, res) => {
     // Ownership/Role Check
     // Allowed if: User is the customer WHO placed it, OR an Admin, OR a Seller who has items in this order
     let isAuthorized = false;
-    if (req.user.type === 'admin') {
+    if (req.user.type === 'admin' || req.user.type === 'super_admin') {
       isAuthorized = true;
     } else if (req.user.type === 'customer' && order.customer_id === req.user.id) {
       isAuthorized = true;
