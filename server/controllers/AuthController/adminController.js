@@ -1057,6 +1057,7 @@ export const getAllReturns = async (req, res) => {
         rr.reason,
         rr.order_id,
         rr.return_type,
+        rr.resolution_note,
         p.name as product_name
       FROM return_requests rr
       JOIN customers c ON rr.customer_id = c.customer_id
@@ -1075,7 +1076,8 @@ export const getAllReturns = async (req, res) => {
         orderId: r.order_id,
         amount: `₹${Number(r.amount).toLocaleString('en-IN')}`,
         date: new Date(r.date).toLocaleDateString('en-IN'),
-        status: r.status // Pending, Approved, Rejected, etc.
+        status: r.status, // Pending, Approved, Rejected, etc.
+        resolutionNote: r.resolution_note
       }))
     });
   } catch (error) {
@@ -1126,8 +1128,13 @@ export const resolveReturnRequest = async (req, res) => {
     );
 
     if (status === 'Approved') {
-      // 3. Initiate Shiprocket Reverse Pickup
-      // Fetch seller pickup location (where item should be returned)
+      // Always update order item status to 'Return Initiated' upon approval
+      await client.query(
+        "UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = $1",
+        [rr.order_item_id]
+      );
+
+      // 3. Initiate Shiprocket Reverse Pickup if configured
       const sellerPickup = await client.query(
         "SELECT * FROM seller_pickup_location WHERE seller_id = $1 AND is_default = true",
         [rr.seller_id]
@@ -1178,7 +1185,7 @@ export const resolveReturnRequest = async (req, res) => {
           const srReturn = await createShiprocketReturn(srPayload);
 
           if (srReturn && (srReturn.status_code === 1 || srReturn.shipment_id)) {
-            // Log reverse shipment
+            // Log reverse shipment with Shiprocket details
             await client.query(
               `INSERT INTO reverse_shipments (
                     reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
@@ -1187,21 +1194,48 @@ export const resolveReturnRequest = async (req, res) => {
                 ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 'Initiated', NOW())`,
               [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, srReturn.order_id, srReturn.awb_code || null]
             );
-
-            // Update order item status
-            await client.query(
-              "UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = $1",
-              [rr.order_item_id]
-            );
           } else {
-            console.warn('Shiprocket Return Sync Warning:', srReturn);
+            console.warn('Shiprocket Return Sync Warning (fallback to offline):', srReturn);
+            // Log reverse shipment with offline fallback details
+            await client.query(
+              `INSERT INTO reverse_shipments (
+                    reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                    pickup_address_id, dropoff_pickup_location_id,
+                    shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+                ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, null, 'Initiated', NOW())`,
+              [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+            );
           }
         } catch (srError) {
-          console.error('Shiprocket Return Sync Exception:', srError.message);
+          console.error('Shiprocket Return Sync Exception (fallback to offline):', srError.message);
+          // Log reverse shipment on exception with offline fallback details
+          await client.query(
+            `INSERT INTO reverse_shipments (
+                  reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                  pickup_address_id, dropoff_pickup_location_id,
+                  shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+              ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, null, 'Initiated', NOW())`,
+            [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+          );
         }
+      } else {
+        console.warn('Seller has no default pickup location (fallback to offline):');
+        // Log reverse shipment with offline fallback details
+        await client.query(
+          `INSERT INTO reverse_shipments (
+                reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                pickup_address_id, dropoff_pickup_location_id,
+                shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, null, $6, null, 'Initiated', NOW())`,
+          [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+        );
       }
     } else if (status === 'Rejected') {
-      // Just update the status, which was already done at step 2.
+      // Update order item status to 'Return Rejected'
+      await client.query(
+        "UPDATE order_items SET item_status = 'Return Rejected' WHERE order_item_id = $1",
+        [rr.order_item_id]
+      );
     }
 
     // 4. Notify Customer

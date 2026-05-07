@@ -14,6 +14,7 @@ import PaymentsIcon from "@mui/icons-material/Payments";
 import MessageIcon from "@mui/icons-material/Message";
 import AddLocationIcon from '@mui/icons-material/AddLocation';
 import LogoutIcon from '@mui/icons-material/Logout';
+import KeyboardReturnIcon from '@mui/icons-material/KeyboardReturn';
 
 const menu = [
   { name: "Overview", path: "/seller", icon: <DashboardIcon /> },
@@ -22,6 +23,7 @@ const menu = [
   { name: "Customers", path: "/seller/customers", icon: <PeopleIcon /> },
   { name: "Analytics", path: "/seller/analytics", icon: <BarChartIcon /> },
   { name: "Payments", path: "/seller/payments", icon: <PaymentsIcon /> },
+  { name: "Returns", path: "/seller/returns", icon: <KeyboardReturnIcon /> },
   // { name: "Messages", path: "/seller/messages", icon: <MessageIcon /> },
   // { name: "Pickups", path: "/seller/pickups", icon: <AddLocationIcon /> },
   { name: "Settings", path: "/seller/settings", icon: <SettingsIcon /> },

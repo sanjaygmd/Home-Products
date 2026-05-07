@@ -16,8 +16,55 @@ import {
   verifyOTP,
   getMe
 } from '../controllers/AuthController/customerController.js';
-import { registerSeller, sellerOnboarding, loginSeller, logoutSeller, getSellerStats, getSellerDashboardData, getSellerOrders, getSellerCustomers, getSellerProfile, updateSellerProfile, getSellerPayments, getSellerFinanceAnalytics, getSellerNotifications, markNotificationRead } from '../controllers/AuthController/sellerController.js';
-import { registerAdmin, loginAdmin, verifySuperAdminLogin, logoutAdmin, updateAdminProfile, requestAdminPasswordReset, verifyAdminPasswordReset, getAdminDashboardData, getSellersData, getFinanceData, exportFinanceReport, getAnalyticsData, getAllOrders, bulkUpdateOrders, autoDispatchOrders, getAllCustomers, getAdminProducts, toggleCustomerStatus, toggleSellerStatus, deleteSeller, getAllPayments, getAllReturns, resolveReturnRequest, changeAdminPassword, updateAdminPasswordSelf, updateMasterKey, getAuditLogs, getAllAdministrators, updateAdminStatus, deleteAdministrator } from '../controllers/AuthController/adminController.js';
+import { 
+  registerSeller, 
+  sellerOnboarding, 
+  loginSeller, 
+  logoutSeller, 
+  getSellerStats, 
+  getSellerDashboardData, 
+  getSellerOrders, 
+  getSellerCustomers, 
+  getSellerProfile, 
+  updateSellerProfile, 
+  getSellerPayments, 
+  getSellerFinanceAnalytics, 
+  getSellerNotifications, 
+  markNotificationRead,
+  getSellerReturns,
+  markReturnReceived,
+  resolveReturnRequestBySeller } from '../controllers/AuthController/sellerController.js';
+import { 
+  registerAdmin, 
+  loginAdmin, 
+  verifySuperAdminLogin,
+  logoutAdmin, 
+  updateAdminProfile, 
+  requestAdminPasswordReset, 
+  verifyAdminPasswordReset, 
+  getAdminDashboardData, 
+  getSellersData, 
+  getFinanceData, 
+  exportFinanceReport, 
+  getAnalyticsData, 
+  getAllOrders, 
+  bulkUpdateOrders, 
+  autoDispatchOrders,
+  getAllCustomers, 
+  getAdminProducts, 
+  toggleCustomerStatus, 
+  toggleSellerStatus, 
+  deleteSeller, 
+  getAllPayments, 
+  getAllReturns, 
+  resolveReturnRequest, 
+  changeAdminPassword, 
+  updateAdminPasswordSelf, 
+  updateMasterKey, 
+  getAuditLogs, 
+  getAllAdministrators, 
+  updateAdminStatus, 
+  deleteAdministrator } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
 import { verifyToken, requireAuth } from '../middlewares/authMiddleware.js';
@@ -56,6 +103,9 @@ authRoutes.post('/seller/send-otp', sendOTP);
 authRoutes.post('/seller/verify-otp', verifyOTP);
 authRoutes.get('/seller/notifications/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerNotifications);
 authRoutes.patch('/seller/notifications/:notification_id/read', requireAuth(['seller', 'admin', 'super_admin']), markNotificationRead);
+authRoutes.get('/seller/returns/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerReturns);
+authRoutes.patch('/seller/returns/:id/receive', requireAuth(['seller', 'admin', 'super_admin']), markReturnReceived);
+authRoutes.patch('/seller/returns/:id/resolve', requireAuth(['seller', 'admin', 'super_admin']), resolveReturnRequestBySeller);
 
 // Admin Auth Routes
 authRoutes.post('/admin/register', registerAdmin);

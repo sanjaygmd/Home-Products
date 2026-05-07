@@ -1,5 +1,6 @@
 import { pool } from "../../configs/db.js";
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
+import { createShiprocketReturn } from "../ShipmentController.js";
 
 export const logoutSeller = async (req, res) => {
   try {
@@ -1034,5 +1035,298 @@ export const markNotificationRead = async (req, res) => {
   } catch (error) {
     console.error("SELLER API ERROR:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const getSellerReturns = async (req, res) => {
+  try {
+    const { id: sellerId } = req.params;
+
+    // Ownership Check
+    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    const returnsQuery = `
+      SELECT 
+        rr.return_request_id as id,
+        c.full_name as customer,
+        rr.refund_amount as amount,
+        rr.refund_status as status,
+        rr.requested_at as date,
+        rr.reason,
+        rr.order_id,
+        rr.return_type,
+        p.name as product_name,
+        rs.reverse_awb_code,
+        rs.status as shipment_status
+      FROM return_requests rr
+      JOIN customers c ON rr.customer_id = c.customer_id
+      JOIN order_items oi ON rr.order_item_id = oi.order_item_id
+      JOIN products p ON oi.product_id = p.product_id
+      LEFT JOIN reverse_shipments rs ON rr.return_request_id = rs.return_request_id
+      WHERE oi.seller_id = $1
+      ORDER BY rr.requested_at DESC
+    `;
+    const result = await pool.query(returnsQuery, [sellerId]);
+
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map(r => ({
+        ...r,
+        id: r.id,
+        displayId: `RET-${r.id.split('-')[0].toUpperCase()}`,
+        orderId: r.order_id,
+        amount: r.amount,
+        date: r.date,
+        status: r.status,
+        reverse_awb_code: r.reverse_awb_code,
+        shipment_status: r.shipment_status
+      }))
+    });
+  } catch (error) {
+    console.error("GET SELLER RETURNS ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch returns" });
+  }
+};
+
+export const markReturnReceived = async (req, res) => {
+  const { id } = req.params; // return_request_id
+  const sellerId = req.user.id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch return details and verify ownership
+    const rrRes = await client.query(
+      `SELECT rr.*, oi.seller_id FROM return_requests rr
+       JOIN order_items oi ON rr.order_item_id = oi.order_item_id
+       WHERE rr.return_request_id = $1`,
+      [id]
+    );
+
+    if (rrRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Return request not found" });
+    }
+
+    if (rrRes.rows[0].seller_id !== sellerId && req.user.type !== 'admin') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ success: false, message: "Unauthorized access to this return request" });
+    }
+
+    // 2. Update status in return_requests
+    await client.query(
+      `UPDATE return_requests 
+       SET refund_status = 'Completed', resolved_at = NOW()
+       WHERE return_request_id = $1`,
+      [id]
+    );
+
+    // 3. Update status in order_items
+    await client.query(
+      `UPDATE order_items 
+       SET item_status = 'Returned'
+       WHERE order_item_id = $1`,
+      [rrRes.rows[0].order_item_id]
+    );
+
+    // 4. Update status in reverse_shipments
+    await client.query(
+      `UPDATE reverse_shipments 
+       SET status = 'Delivered', delivered_at = NOW()
+       WHERE return_request_id = $1`,
+      [id]
+    );
+
+    // 5. Notify customer
+    await client.query(
+      `INSERT INTO notifications (notification_id, customer_id, type, message, created_at)
+       VALUES (gen_random_uuid(), $1, 'return_complete', $2, NOW())`,
+      [rrRes.rows[0].customer_id, `Your return for Order #${rrRes.rows[0].order_id.slice(0, 8).toUpperCase()} has been received and processed. Thank you!`]
+    );
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: "Return marked as received successfully." });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("MARK RETURN RECEIVED ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to update return status." });
+  } finally {
+    client.release();
+  }
+};
+
+export const resolveReturnRequestBySeller = async (req, res) => {
+  const { id } = req.params; // return_request_id
+  const { status, resolution_note } = req.body; // status: 'Approved' or 'Rejected'
+  const sellerId = req.user.id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch return request details and verify ownership
+    const rrRes = await client.query(
+      `SELECT rr.*, o.address_id, oi.seller_id, oi.product_id, oi.variant_id, oi.quantity, oi.unit_price,
+              c.full_name as cust_name, c.email as cust_email, c.phone as cust_phone,
+              a.address_line_1, a.city, a.state, a.pincode, p.name as product_name
+       FROM return_requests rr
+       JOIN orders o ON rr.order_id = o.order_id
+       JOIN order_items oi ON rr.order_item_id = oi.order_item_id
+       JOIN products p ON oi.product_id = p.product_id
+       JOIN customers c ON rr.customer_id = c.customer_id
+       JOIN addresses a ON o.address_id = a.address_id
+       WHERE rr.return_request_id = $1`,
+      [id]
+    );
+
+    if (rrRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Return request not found" });
+    }
+
+    const rr = rrRes.rows[0];
+
+    if (rr.seller_id !== sellerId && req.user.type !== 'admin') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ success: false, message: "Unauthorized access to this return request" });
+    }
+
+    // 2. Update status in return_requests
+    await client.query(
+      `UPDATE return_requests 
+       SET refund_status = $1, resolution_note = $2, resolved_at = NOW()
+       WHERE return_request_id = $3`,
+      [status, resolution_note || null, id]
+    );
+
+    if (status === 'Approved') {
+      // Always update order item status to 'Return Initiated' upon approval
+      await client.query(
+        "UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = $1",
+        [rr.order_item_id]
+      );
+
+      // 3. Initiate Shiprocket Reverse Pickup if configured
+      const sellerPickup = await client.query(
+        "SELECT * FROM seller_pickup_location WHERE seller_id = $1 AND is_default = true",
+        [rr.seller_id]
+      );
+
+      if (sellerPickup.rows.length > 0) {
+        const pickup = sellerPickup.rows[0];
+
+        // Construct Shiprocket Payload for Return
+        const srPayload = {
+          order_id: `RET-${rr.return_request_id.slice(0, 8)}`,
+          order_date: new Date().toISOString().split('T')[0],
+          pickup_customer_name: rr.cust_name,
+          pickup_last_name: "",
+          pickup_address: rr.address_line_1,
+          pickup_city: rr.city,
+          pickup_state: rr.state,
+          pickup_country: "India",
+          pickup_pincode: rr.pincode,
+          pickup_email: rr.cust_email,
+          pickup_phone: rr.cust_phone,
+          shipping_customer_name: pickup.contact_name,
+          shipping_last_name: "",
+          shipping_address: pickup.address_line_1,
+          shipping_city: pickup.city,
+          shipping_state: pickup.state,
+          shipping_country: "India",
+          shipping_pincode: pickup.pincode,
+          shipping_email: pickup.email || "support@marketplace.com",
+          shipping_phone: pickup.contact_phone,
+          order_items: [
+            {
+              name: rr.product_name || "Return Item",
+              sku: rr.product_id.slice(0, 8),
+              units: rr.quantity,
+              selling_price: rr.unit_price
+            }
+          ],
+          payment_method: "Prepaid",
+          sub_total: rr.refund_amount,
+          length: 10,
+          breadth: 10,
+          height: 10,
+          weight: 0.5
+        };
+
+        try {
+          const srReturn = await createShiprocketReturn(srPayload);
+
+          if (srReturn && (srReturn.status_code === 1 || srReturn.shipment_id)) {
+            // Log reverse shipment with Shiprocket details
+            await client.query(
+              `INSERT INTO reverse_shipments (
+                    reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                    pickup_address_id, dropoff_pickup_location_id,
+                    shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+                ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 'Initiated', NOW())`,
+              [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, srReturn.order_id, srReturn.awb_code || null]
+            );
+          } else {
+            console.warn('Shiprocket Return Sync Warning (fallback to offline):', srReturn);
+            // Log reverse shipment with offline fallback details
+            await client.query(
+              `INSERT INTO reverse_shipments (
+                    reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                    pickup_address_id, dropoff_pickup_location_id,
+                    shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+                ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, null, 'Initiated', NOW())`,
+              [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+            );
+          }
+        } catch (srError) {
+          console.error('Shiprocket Return Sync Exception (fallback to offline):', srError.message);
+          // Log reverse shipment on exception with offline fallback details
+          await client.query(
+            `INSERT INTO reverse_shipments (
+                  reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                  pickup_address_id, dropoff_pickup_location_id,
+                  shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+              ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, null, 'Initiated', NOW())`,
+            [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, pickup.pickup_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+          );
+        }
+      } else {
+        console.warn('Seller has no default pickup location (fallback to offline):');
+        // Log reverse shipment with offline fallback details
+        await client.query(
+          `INSERT INTO reverse_shipments (
+                reverse_id, return_request_id, order_item_id, seller_id, customer_id, 
+                pickup_address_id, dropoff_pickup_location_id,
+                shiprocket_reverse_order_id, reverse_awb_code, status, initiated_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, null, $6, null, 'Initiated', NOW())`,
+          [id, rr.order_item_id, rr.seller_id, rr.customer_id, rr.address_id, `RET-MANUAL-${rr.return_request_id.slice(0, 8).toUpperCase()}`]
+        );
+      }
+    } else if (status === 'Rejected') {
+      // Update order item status to 'Return Rejected'
+      await client.query(
+        "UPDATE order_items SET item_status = 'Return Rejected' WHERE order_item_id = $1",
+        [rr.order_item_id]
+      );
+    }
+
+    // Notify customer of response
+    await client.query(
+      `INSERT INTO notifications (notification_id, customer_id, type, message, created_at)
+       VALUES (gen_random_uuid(), $1, 'return_resolved', $2, NOW())`,
+      [rr.customer_id, `Your return request for product ${rr.product_name} has been ${status.toLowerCase()} by the seller.`]
+    );
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: `Return request ${status.toLowerCase()} successfully.` });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("RESOLVE RETURN BY SELLER ERROR:", error);
+    return res.status(500).json({ success: false, message: "Failed to resolve return request." });
+  } finally {
+    client.release();
   }
 };

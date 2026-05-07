@@ -2,9 +2,11 @@ import React, { useState, useEffect } from "react";
 import { X, Package, MapPin, CreditCard, Clock, CheckCircle, Truck, AlertCircle, RotateCcw, Image as ImageIcon, Loader2 } from "lucide-react";
 import { getOrderDetails, cancelOrder, createReturnRequest } from "../../services/orderService";
 import { useAuth } from "../../context/AuthContext.jsx";
+import { useToast } from "../../hooks/use-toast";
 
 const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
   const { currentUser } = useAuth();
+  const { toast } = useToast();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -17,6 +19,36 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
   const [returnReason, setReturnReason] = useState("");
   const [returnType, setReturnType] = useState("Refund");
   const [returning, setReturning] = useState(false);
+
+  const getItemStatusBadge = (status) => {
+    switch (status) {
+      case "Return Pending":
+        return {
+          label: "Return Requested (Pending)",
+          style: "bg-amber-50 text-amber-700 border-amber-200/50"
+        };
+      case "Return Initiated":
+        return {
+          label: "Return Approved (En Route)",
+          style: "bg-indigo-50 text-indigo-700 border-indigo-200/50"
+        };
+      case "Return Rejected":
+        return {
+          label: "Return Request Rejected",
+          style: "bg-rose-50 text-rose-700 border-rose-200/50"
+        };
+      case "Returned":
+        return {
+          label: "Returned & Refunded",
+          style: "bg-emerald-50 text-emerald-700 border-emerald-200/50"
+        };
+      default:
+        return {
+          label: status,
+          style: "bg-slate-50 text-slate-700 border-slate-200/50"
+        };
+    }
+  };
 
   useEffect(() => {
     if (orderId) {
@@ -35,7 +67,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
 
   const handleCancelOrder = async () => {
     if (!cancelReason.trim()) {
-      alert("Please provide a reason for cancellation");
+      toast({ variant: "destructive", title: "Required", description: "Please provide a reason for cancellation" });
       return;
     }
     
@@ -48,11 +80,11 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
         setShowCancelConfirm(false);
         if (onOrderUpdate) onOrderUpdate();
       } else {
-        alert(res.message || "Failed to cancel order");
+        toast({ variant: "destructive", title: "Error", description: res.message || "Failed to cancel order" });
       }
     } catch (error) {
       console.error(error);
-      alert("Failed to cancel order");
+      toast({ variant: "destructive", title: "Error", description: "Failed to cancel order" });
     } finally {
       setCancelling(false);
     }
@@ -65,7 +97,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
 
   const handleSubmitReturn = async () => {
     if (!returnReason.trim()) {
-      alert("Please provide a reason for return");
+      toast({ variant: "destructive", title: "Required", description: "Please provide a reason for return" });
       return;
     }
 
@@ -82,7 +114,7 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
       });
 
       if (res.success) {
-        alert("Return request submitted successfully!");
+        toast({ title: "Success", description: "Return request submitted successfully!" });
         setShowReturnForm(false);
         setSelectedItemForReturn(null);
         setReturnReason("");
@@ -90,11 +122,11 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
         const refresh = await getOrderDetails(orderId);
         if (refresh.success) setOrder(refresh.data);
       } else {
-        alert(res.message || "Failed to submit return request");
+        toast({ variant: "destructive", title: "Error", description: res.message || "Failed to submit return request" });
       }
     } catch (error) {
       console.error(error);
-      alert("An error occurred while submitting the return request.");
+      toast({ variant: "destructive", title: "Error", description: "An error occurred while submitting the return request." });
     } finally {
       setReturning(false);
     }
@@ -322,9 +354,26 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
                                 <p className="font-bold text-gray-900">{item.product_name}</p>
                                 {item.variant_name && <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">{item.variant_name}: {item.variant_value}</p>}
                                 {item.item_status && item.item_status !== 'Delivered' && (
-                                  <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md border border-rose-100 inline-block mt-1">
-                                    {item.item_status}
-                                  </span>
+                                  <div className="mt-2 space-y-1 bg-slate-50 border border-slate-100 p-3 rounded-xl max-w-xs">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`text-[8px] md:text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${getItemStatusBadge(item.item_status).style}`}>
+                                        {getItemStatusBadge(item.item_status).label}
+                                      </span>
+                                    </div>
+                                    {item.return_resolution_note && (
+                                      <p className="text-[11px] font-semibold text-gray-600 mt-1 leading-snug">
+                                        <span className="font-extrabold text-gray-800">Note: </span>
+                                        "{item.return_resolution_note}"
+                                      </p>
+                                    )}
+                                    {item.reverse_awb_code && (
+                                      <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200/50 mt-1 text-[9px] text-gray-500 font-bold">
+                                        <span>AWB: <span className="text-gray-900 font-extrabold">{item.reverse_awb_code}</span></span>
+                                        <span>•</span>
+                                        <span>Courier: <span className="text-indigo-600 font-extrabold uppercase">{item.reverse_shipment_status || 'Initiated'}</span></span>
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -339,6 +388,10 @@ const OrderDetailsModal = ({ orderId, onClose, onOrderUpdate }) => {
                               >
                                 Return
                               </button>
+                            ) : item.item_status ? (
+                              <span className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-widest border ${getItemStatusBadge(item.item_status).style}`}>
+                                {getItemStatusBadge(item.item_status).label}
+                              </span>
                             ) : (
                               <span className="text-gray-300 text-[10px] font-bold uppercase tracking-widest">N/A</span>
                             )}

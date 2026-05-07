@@ -51,6 +51,7 @@ const SellerPortalNav = () => {
     if (location.pathname.includes("analytics")) return "Analytics";
     if (location.pathname.includes("payments")) return "Payments";
     if (location.pathname.includes("messages")) return "Messages";
+    if (location.pathname.includes("returns")) return "Returns";
     if (location.pathname.includes("settings")) return "Settings";
     return "Dashboard";
   };

@@ -6,9 +6,11 @@ import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import { useAuth } from "../../context/AuthContext.jsx";
+import { useToast } from "../../hooks/use-toast";
 
 const OrderDetailsModal = ({ orderId, onClose }) => {
   const { currentUser } = useAuth();
+  const { toast } = useToast();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [newStatus, setNewStatus] = useState("");
@@ -31,7 +33,7 @@ const OrderDetailsModal = ({ orderId, onClose }) => {
   const handleUpdateStatus = async () => {
     if (newStatus === order.order_status) return;
     if (newStatus === 'Cancelled' && !cancellationReason.trim()) {
-      alert("Please provide a reason for cancellation.");
+      toast({ variant: "destructive", title: "Required", description: "Please provide a reason for cancellation." });
       return;
     }
 
@@ -48,9 +50,9 @@ const OrderDetailsModal = ({ orderId, onClose }) => {
         setOrder(refresh.data);
         setCancellationReason("");
       }
-      alert("Status updated successfully!");
+      toast({ title: "Success", description: "Status updated successfully!" });
     } else {
-      alert("Failed to update status: " + res.message);
+      toast({ variant: "destructive", title: "Error", description: "Failed to update status: " + res.message });
     }
     setUpdating(false);
   };
@@ -193,6 +195,11 @@ const OrderDetailsModal = ({ orderId, onClose }) => {
                               <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
                                 {item.variant_name}: {item.variant_value}
                               </p>
+                            )}
+                            {item.item_status && item.item_status !== 'Delivered' && (
+                              <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md border border-rose-100 inline-block mt-1">
+                                {item.item_status}
+                              </span>
                             )}
                           </div>
                         </div>

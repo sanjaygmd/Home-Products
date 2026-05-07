@@ -352,14 +352,19 @@ export const getOrderById = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized access to order details" });
     }
 
-    // Fetch order items with product details and commission info
+    // Fetch order items with product details, commission info, and return details
     const itemsRes = await pool.query(
       `SELECT oi.*, p.name as product_name, p.slug, p.images, pv.variant_name, pv.variant_value,
-                    sc.commission_rate, sc.commission_amount, sc.seller_earnings
+                    sc.commission_rate, sc.commission_amount, sc.seller_earnings,
+                    rr.return_request_id, rr.reason as return_reason, rr.return_type, rr.refund_amount as return_refund_amount,
+                    rr.refund_status as return_refund_status, rr.resolution_note as return_resolution_note,
+                    rs.reverse_awb_code, rs.status as reverse_shipment_status
              FROM order_items oi
              JOIN products p ON oi.product_id = p.product_id
              LEFT JOIN product_variants pv ON oi.variant_id = pv.variant_id
              LEFT JOIN seller_commissions sc ON oi.order_item_id = sc.order_item_id
+             LEFT JOIN return_requests rr ON oi.order_item_id = rr.order_item_id
+             LEFT JOIN reverse_shipments rs ON rr.return_request_id = rs.return_request_id
              WHERE oi.order_id = $1`,
       [order_id]
     );
@@ -448,16 +453,24 @@ export const updateOrderStatus = async (req, res) => {
       [status, status === 'Cancelled' ? notes : null, courier, tracking_id, est_delivery, order_id]
     );
 
-    // 1b. Sync with deliveries table
+    // 1b. Sync with order_items table (unless item is already returned or returning)
+    await client.query(
+      `UPDATE order_items 
+       SET item_status = $1 
+       WHERE order_id = $2 AND item_status NOT LIKE 'Return%'`,
+      [status, order_id]
+    );
+
+    // 1c. Sync with deliveries table
     if (status === 'Shipped' || status === 'Delivered' || status === 'Processing') {
       await client.query(`
                 INSERT INTO deliveries (
                     delivery_id, order_id, courier_name, awb_code, shipping_status, 
                     dispatched_at, delivered_at, updated_at, created_at
                 ) VALUES (
-                    gen_random_uuid(), $1, $2, $3, $4,
-                    CASE WHEN $4 = 'Shipped' OR $4 = 'Delivered' THEN NOW() ELSE NULL END,
-                    CASE WHEN $4 = 'Delivered' THEN NOW() ELSE NULL END,
+                    gen_random_uuid(), $1, $2, $3, $4::varchar,
+                    CASE WHEN $4::varchar = 'Shipped' OR $4::varchar = 'Delivered' THEN NOW() ELSE NULL END,
+                    CASE WHEN $4::varchar = 'Delivered' THEN NOW() ELSE NULL END,
                     NOW(), NOW()
                 )
                 ON CONFLICT (order_id) DO UPDATE SET
@@ -575,6 +588,16 @@ export const createReturnRequest = async (req, res) => {
 
         await client.query('BEGIN');
 
+        // Check if return request already exists
+        const existingReturn = await client.query(
+            "SELECT 1 FROM return_requests WHERE order_item_id = $1",
+            [order_item_id]
+        );
+        if (existingReturn.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, message: "Return request has already been submitted for this item." });
+        }
+
         // 1. Verify the order belongs to the customer and is delivered
         const orderCheck = await client.query(
             "SELECT order_status FROM orders WHERE order_id = $1 AND customer_id = $2",
@@ -615,6 +638,12 @@ export const createReturnRequest = async (req, res) => {
             [order_id, order_item_id, customer_id, reason, return_type, refund_amount]
         );
         const return_request_id = returnRes.rows[0].return_request_id;
+
+        // 3b. Update order_items SET item_status = 'Return Pending'
+        await client.query(
+            "UPDATE order_items SET item_status = 'Return Pending' WHERE order_item_id = $1",
+            [order_item_id]
+        );
 
         // 4. Create notification for admin
         await client.query(

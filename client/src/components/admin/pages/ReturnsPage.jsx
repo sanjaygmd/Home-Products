@@ -8,6 +8,8 @@ import {
 import { cn } from "../../../lib/utils";
 import { useToast } from "../../../hooks/use-toast";
 import { api } from "../../../services/api";
+import { useAuth } from "../../../context/AuthContext.jsx";
+
 
 const ReturnStatCard = ({ title, value, label, icon: Icon, color }) => (
   <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
@@ -35,6 +37,10 @@ export default function ReturnsPage() {
   const { toast } = useToast();
   const { currentUser } = useAuth();
 
+  const [actionModal, setActionModal] = useState(null); // { type: 'Approved' | 'Rejected', returnId: string }
+  const [resolutionNote, setResolutionNote] = useState("");
+  const [submittingAction, setSubmittingAction] = useState(false);
+
   useEffect(() => {
     fetchReturns();
   }, []);
@@ -54,13 +60,19 @@ export default function ReturnsPage() {
     }
   };
 
-  const handleResolveReturn = async (id, status) => {
+  const submitResolution = async (id, status) => {
+    if (!resolutionNote.trim()) {
+      toast({ title: "Note Required", description: "Please enter a resolution note for the customer.", variant: "destructive" });
+      return;
+    }
+
+    setSubmittingAction(true);
     try {
       const adminId = currentUser?.id;
 
       const resp = await api.post(`/user/admin/returns/${id}/resolve`, { 
         status, 
-        resolution_note: status === 'Approved' ? 'Return request approved by admin' : 'Return request rejected by admin',
+        resolution_note: resolutionNote.trim(),
         admin_id: adminId
       });
       
@@ -68,12 +80,16 @@ export default function ReturnsPage() {
         toast({ title: `Return ${status}`, description: resp.data.message });
         fetchReturns();
         setSelectedReturn(null);
+        setActionModal(null);
+        setResolutionNote("");
       } else {
         toast({ title: "Action Failed", description: resp.data.message, variant: "destructive" });
       }
     } catch (err) {
       console.error(err);
       toast({ title: "Error", description: "An error occurred while resolving the request.", variant: "destructive" });
+    } finally {
+      setSubmittingAction(false);
     }
   };
 
@@ -260,21 +276,60 @@ export default function ReturnsPage() {
                 ))}
               </div>
 
-              <div className="flex gap-4">
-                <Button 
-                  className="flex-1 h-16 rounded-[1.5rem] bg-slate-950 text-white font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
-                  onClick={() => handleResolveReturn(selectedReturn.id, 'Approved')}
-                >
-                  Approve Return
-                </Button>
-                <Button 
-                  variant="outline"
-                  className="flex-1 h-16 rounded-[1.5rem] border-slate-200 text-slate-600 font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-50 transition-all"
-                  onClick={() => handleResolveReturn(selectedReturn.id, 'Rejected')}
-                >
-                  Reject Request
-                </Button>
-              </div>
+              {actionModal ? (
+                <div className="mt-8 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] space-y-4 animate-in slide-in-from-bottom-5 duration-300">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-slate-800 flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full ${actionModal.type === 'Approved' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    {actionModal.type === 'Approved' ? 'Approve Return Request' : 'Reject Return Request'}
+                  </h4>
+                  <textarea
+                    placeholder="Enter custom resolution notes for the customer..."
+                    className="w-full p-4 rounded-xl border border-slate-200 bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-slate-900/10 min-h-[100px] resize-none text-slate-800"
+                    value={resolutionNote}
+                    onChange={(e) => setResolutionNote(e.target.value)}
+                  />
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      className="flex-1 h-12 rounded-xl border-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-wider hover:bg-white transition"
+                      onClick={() => { setActionModal(null); setResolutionNote(""); }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      className={cn(
+                        "flex-1 h-12 rounded-xl text-white text-[10px] font-black uppercase tracking-wider transition",
+                        actionModal.type === 'Approved' ? "bg-slate-950 hover:bg-slate-800" : "bg-rose-600 hover:bg-rose-500"
+                      )}
+                      disabled={submittingAction}
+                      onClick={() => submitResolution(actionModal.returnId, actionModal.type)}
+                    >
+                      {submittingAction ? <Loader2 className="animate-spin h-4 w-4" /> : `Confirm ${actionModal.type}`}
+                    </Button>
+                  </div>
+                </div>
+              ) : selectedReturn.status === 'Pending' ? (
+                <div className="flex gap-4">
+                  <Button 
+                    className="flex-1 h-16 rounded-[1.5rem] bg-slate-950 text-white font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+                    onClick={() => setActionModal({ type: 'Approved', returnId: selectedReturn.id })}
+                  >
+                    Approve Return
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    className="flex-1 h-16 rounded-[1.5rem] border-slate-200 text-slate-600 font-black uppercase text-[11px] tracking-[0.2em] hover:bg-slate-50 transition-all"
+                    onClick={() => setActionModal({ type: 'Rejected', returnId: selectedReturn.id })}
+                  >
+                    Reject Request
+                  </Button>
+                </div>
+              ) : (
+                <div className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-center">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Resolution Note</p>
+                  <p className="text-sm font-bold text-slate-700 mt-2">"{selectedReturn.resolutionNote || 'No resolution notes entered'}"</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

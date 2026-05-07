@@ -26,13 +26,9 @@ const NotificationsDropdown = ({ customerId }) => {
         return () => clearInterval(interval);
     }, [customerId]);
 
-    const handleMarkAsRead = async (id, orderId) => {
+    const handleMarkAsRead = async (id) => {
         await markNotificationAsRead(id);
         setNotifications(prev => prev.map(n => n.notification_id === id ? { ...n, is_read: true } : n));
-        if (orderId) {
-            navigate(`/order-details/${orderId}`);
-            setShowDropdown(false);
-        }
     };
 
     const handleMarkAllRead = async () => {
@@ -81,7 +77,7 @@ const NotificationsDropdown = ({ customerId }) => {
                             notifications.map((n) => (
                                 <div 
                                     key={n.notification_id}
-                                    onClick={() => handleMarkAsRead(n.notification_id, n.order_id)}
+                                    onClick={() => handleMarkAsRead(n.notification_id)}
                                     className={`p-5 hover:bg-gray-50 transition-colors flex gap-4 cursor-pointer border-b border-gray-50 last:border-0 relative ${!n.is_read ? 'bg-blue-50/30' : ''}`}
                                 >
                                     {!n.is_read && (

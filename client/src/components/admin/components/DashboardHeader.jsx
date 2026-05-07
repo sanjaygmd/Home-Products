@@ -68,6 +68,7 @@ export function DashboardHeader() {
     { title: "Dashboard", path: "/admin", icon: LayoutDashboard },
     { title: "Products", path: "/admin/products", icon: Package },
     { title: "Orders", path: "/admin/orders", icon: ShoppingCart },
+    { title: "Returns", path: "/admin/returns", icon: RotateCcw },
     { title: "Customers", path: "/admin/customers", icon: Users },
     { title: "Coupons", path: "/admin/coupons", icon: Ticket },
     { title: "Reviews", path: "/admin/reviews", icon: MessageSquare },

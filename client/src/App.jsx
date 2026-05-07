@@ -24,6 +24,7 @@ import SellerAnalytics from './components/SellerDashboard/SellerAnalytics.jsx';
 import SellerPayments from './components/SellerDashboard/SellerPayments.jsx';
 import SellerMessages from './components/SellerDashboard/SellerMessages.jsx';
 import SellerPickups from './components/SellerDashboard/SellerPickups.jsx';
+import SellerReturns from './components/SellerDashboard/SellerReturns.jsx';
 
 import AddProduct from './components/SellerDashboard/AddProduct.jsx';
 import EditProduct from './components/SellerDashboard/EditProduct.jsx';
@@ -156,6 +157,7 @@ function MainApp() {
                       <Route path='payments' element={<SellerPayments />} />
                       {/* <Route path='messages' element={<SellerMessages />}/> */}
                       <Route path='pickups' element={<SellerPickups />} />
+                      <Route path='returns' element={<SellerReturns />} />
                       <Route path='settings' element={<SellerSettings />} />
                     </Route>
 
