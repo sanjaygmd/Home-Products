@@ -8,16 +8,24 @@ export default function SystemLogsPage() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedLog, setExpandedLog] = useState(null);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalLogs, setTotalLogs] = useState(0);
 
     useEffect(() => {
-        fetchLogs();
-    }, []);
+        fetchLogs(page);
+    }, [page]);
 
-    const fetchLogs = async () => {
+    const fetchLogs = async (currentPage = 1) => {
+        setLoading(true);
         try {
-            const res = await api.get('/user/admin/audit-logs');
+            const res = await api.get(`/user/admin/audit-logs?page=${currentPage}&limit=20`);
             if (res.data.success) {
                 setLogs(res.data.data);
+                if (res.data.pagination) {
+                    setTotalPages(res.data.pagination.totalPages || 1);
+                    setTotalLogs(res.data.pagination.total || 0);
+                }
             }
         } catch (error) {
             console.error("Failed to fetch logs:", error);
@@ -176,6 +184,31 @@ export default function SystemLogsPage() {
                     ))
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {!loading && totalPages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/85 backdrop-blur-md px-8 py-5 rounded-[30px] border border-slate-100 shadow-md mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="text-xs font-black text-slate-500 uppercase tracking-widest">
+                        Showing page <span className="text-slate-950">{page}</span> of <span className="text-slate-950">{totalPages}</span> ({totalLogs} Total Event Logs)
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                            disabled={page === 1}
+                            className="px-5 py-2.5 bg-slate-50 hover:bg-slate-950 text-slate-950 hover:text-white disabled:opacity-30 disabled:hover:bg-slate-50 disabled:hover:text-slate-950 rounded-xl font-black text-[11px] uppercase tracking-widest border border-slate-100 transition-all duration-300 shadow-sm disabled:cursor-not-allowed"
+                        >
+                            Previous
+                        </button>
+                        <button
+                            onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                            disabled={page === totalPages}
+                            className="px-5 py-2.5 bg-slate-50 hover:bg-slate-950 text-slate-950 hover:text-white disabled:opacity-30 disabled:hover:bg-slate-50 disabled:hover:text-slate-950 rounded-xl font-black text-[11px] uppercase tracking-widest border border-slate-100 transition-all duration-300 shadow-sm disabled:cursor-not-allowed"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

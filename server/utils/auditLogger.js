@@ -39,7 +39,7 @@ export const logAction = async (req, action, payload = {}) => {
         const record_id = payload.product_id || payload.variant_id || payload.coupon_id || null;
         
         // Extract IP and User Agent
-        const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0';
+        const ip = req.ip || req.socket.remoteAddress || '0.0.0.0';
         const userAgent = req.get('User-Agent') || 'Server Process';
 
 
@@ -71,7 +71,7 @@ export const logAction = async (req, action, payload = {}) => {
 export const logAudit = async ({ admin_id, action, table_name, record_id, old_values = null, new_values = null, req = null, is_super_admin = false }) => {
     // ... (rest of old logic is similar, but logAction is now preferred)
     try {
-        const ip = req?.ip || req?.headers?.['x-forwarded-for'] || req?.connection?.remoteAddress || '0.0.0.0';
+        const ip = req?.ip || req?.socket?.remoteAddress || '0.0.0.0';
         const userAgent = req?.get('User-Agent') || 'Server Process';
 
         const userType = req?.user?.type || req?.user?.role;

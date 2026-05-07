@@ -134,7 +134,7 @@ export const createOrder = async (req, res) => {
     let serverDiscountAmount = 0;
     if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
       const couponCheck = await client.query(
-        "SELECT type, discount_percent, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
+        "SELECT type, discount_percent, discount_amount, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
         [coupon_id]
       );
 
@@ -158,8 +158,8 @@ export const createOrder = async (req, res) => {
             serverDiscountAmount = Math.min(serverDiscountAmount, parseFloat(coupon.max_discount));
           }
         } else {
-          // Fixed discount or other types can be handled here
-          serverDiscountAmount = parseFloat(discount_amount); // Fallback for fixed if not in DB
+          // Fixed discount from database
+          serverDiscountAmount = parseFloat(coupon.discount_amount || 0);
         }
 
         await client.query("UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = $1", [coupon_id]);
@@ -174,7 +174,7 @@ export const createOrder = async (req, res) => {
     const final_tax_amount = Math.round(serverCalculatedSubtotal * 0.05); // 5% Tax
     const final_platform_fee = 10;
     const final_cod_fee = payment_method === 'cod' ? 50 : 0;
-    const final_shipping = parseFloat(shipping_charges);
+    const final_shipping = Math.max(0, parseFloat(shipping_charges || 0));
     const final_total_amount = serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount;
 
     // 6. Insert into orders

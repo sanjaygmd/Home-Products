@@ -25,6 +25,7 @@ import { fixSellerConstraints } from './migrations/fix_seller_constraints.js';
 import { pruneExpiredRecords } from './utils/cleanupTask.js';
 
 const app = express();
+app.set('trust proxy', 1);
 const port = process.env.PORT || 5000
 
 app.use(helmet({
@@ -88,7 +89,17 @@ const otpLimiter = rateLimit({
     message: { success: false, message: "Too many OTP requests, please try again after 15 minutes" }
 });
 
+const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // limit each IP to 5 registrations per hour
+    message: { success: false, message: "Too many registration attempts from this IP, please try again after an hour." }
+});
+
 // Apply rate limiters to specific routes
+app.use('/user/customer/register', registerLimiter);
+app.use('/user/seller/register', registerLimiter);
+app.use('/user/admin/register', registerLimiter);
+app.use('/user/admin/reset-password-via-link', authLimiter);
 app.use('/user/customer/login', authLimiter);
 app.use('/user/seller/login', authLimiter);
 app.use('/user/admin/login', authLimiter);

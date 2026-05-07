@@ -64,10 +64,11 @@ import {
   getAuditLogs, 
   getAllAdministrators, 
   updateAdminStatus, 
-  deleteAdministrator } from '../controllers/AuthController/adminController.js';
+  deleteAdministrator,
+  resetPasswordViaLink } from '../controllers/AuthController/adminController.js';
 import { getAdminSettings, updateAdminSettings, getAdminNotifications } from '../controllers/AdminSettingsController.js';
 import { getAllReviews, deleteReview, addReview, getProductReviews, checkCanReview, updateReview } from '../controllers/ReviewController.js';
-import { verifyToken, requireAuth } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAuth, optionalAuth } from '../middlewares/authMiddleware.js';
 
 const authRoutes = express.Router();
 
@@ -76,7 +77,7 @@ authRoutes.get('/me', verifyToken, getMe);
 // Customer Routes
 authRoutes.post('/customer/register', registerCustomer);
 authRoutes.post('/customer/login', loginCustomer);
-authRoutes.post('/customer/logout', logoutCustomer);
+authRoutes.post('/customer/logout', optionalAuth, logoutCustomer);
 authRoutes.post('/customer-onboarding/:id', requireAuth(['customer', 'admin', 'super_admin']), customerOnboarding);
 authRoutes.put('/customer/update/:id', requireAuth(['customer', 'admin', 'super_admin']), updateCustomer);
 authRoutes.get('/customer/stats/:id', requireAuth(['customer', 'admin', 'super_admin']), getCustomerStats);
@@ -89,7 +90,7 @@ authRoutes.get('/customer/:id', requireAuth(['customer', 'admin', 'super_admin']
 // Seller Routes
 authRoutes.post('/seller/register', registerSeller);
 authRoutes.post('/seller/login', loginSeller);
-authRoutes.post('/seller/logout', logoutSeller);
+authRoutes.post('/seller/logout', optionalAuth, logoutSeller);
 authRoutes.post('/seller-onboarding/:id', requireAuth(['seller', 'admin', 'super_admin']), sellerOnboarding);
 authRoutes.get('/seller/stats/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerStats);
 authRoutes.get('/seller/dashboard/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerDashboardData);
@@ -113,7 +114,8 @@ authRoutes.post('/admin/login', loginAdmin);
 authRoutes.post('/admin/verify-super-admin-login', verifySuperAdminLogin);
 authRoutes.post('/admin/request-password-reset', requestAdminPasswordReset);
 authRoutes.post('/admin/verify-password-reset', verifyAdminPasswordReset);
-authRoutes.post('/admin/logout', logoutAdmin);
+authRoutes.post('/admin/reset-password-via-link', resetPasswordViaLink);
+authRoutes.post('/admin/logout', optionalAuth, logoutAdmin);
 authRoutes.get('/admin/dashboard-data', requireAuth(['admin', 'super_admin']), getAdminDashboardData);
 authRoutes.get('/admin/sellers-data', requireAuth(['admin', 'super_admin']), getSellersData);
 authRoutes.get('/admin/finance-data', requireAuth(['admin', 'super_admin']), getFinanceData);

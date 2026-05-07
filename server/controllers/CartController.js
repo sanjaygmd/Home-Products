@@ -113,6 +113,31 @@ export const addToCart = async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Fetch secure authentic price from DB
+        let dbPrice = 0;
+        if (variant_id) {
+            const vCheck = await client.query(
+                "SELECT price FROM product_variants WHERE variant_id = $1 AND product_id = $2",
+                [variant_id, product_id]
+            );
+            if (vCheck.rows.length === 0) {
+                // Fallback to product price if variant check fails
+                const pCheck = await client.query("SELECT price FROM products WHERE product_id = $1", [product_id]);
+                if (pCheck.rows.length === 0) {
+                    throw new Error("Product not found");
+                }
+                dbPrice = parseFloat(pCheck.rows[0].price);
+            } else {
+                dbPrice = parseFloat(vCheck.rows[0].price);
+            }
+        } else {
+            const pCheck = await client.query("SELECT price FROM products WHERE product_id = $1", [product_id]);
+            if (pCheck.rows.length === 0) {
+                throw new Error("Product not found");
+            }
+            dbPrice = parseFloat(pCheck.rows[0].price);
+        }
+
         const cart_id = await getOrCreateCart(client, customer_id);
 
         // Check if same product+variant already in cart
@@ -123,17 +148,17 @@ export const addToCart = async (req, res) => {
         );
 
         if (existing.rows.length > 0) {
-            // Increment quantity
+            // Increment quantity and update price to secure DB price
             await client.query(
-                'UPDATE cart_items SET quantity = quantity + $1, updated_at = NOW() WHERE cart_item_id = $2',
-                [quantity || 1, existing.rows[0].cart_item_id]
+                'UPDATE cart_items SET quantity = quantity + $1, price = $2, updated_at = NOW() WHERE cart_item_id = $3',
+                [quantity || 1, dbPrice, existing.rows[0].cart_item_id]
             );
         } else {
-            // Insert new item with explicit UUID
+            // Insert new item with secure DB price
             await client.query(
                 `INSERT INTO cart_items (cart_item_id, cart_id, product_id, variant_id, quantity, price)
                  VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
-                [cart_id, product_id, variant_id || null, quantity || 1, price]
+                [cart_id, product_id, variant_id || null, quantity || 1, dbPrice]
             );
         }
 

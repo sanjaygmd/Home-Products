@@ -43,6 +43,7 @@ import { SellerProtectedRoute, CustomerProtectedRoute, PublicRoute, AdminProtect
 // Admin Imports
 import { DashboardLayout } from './components/admin/components/DashboardLayout.jsx';
 import AdminAuthPage from './components/admin/pages/AdminAuthPage.jsx';
+import AdminResetPasswordPage from './components/admin/pages/AdminResetPasswordPage.jsx';
 import DashboardHome from './components/admin/pages/DashboardHome.jsx';
 import ProductsPage from './components/admin/pages/ProductsPage.jsx';
 import OrdersPage from './components/admin/pages/OrdersPage.jsx';
@@ -164,6 +165,7 @@ function MainApp() {
                     {/* Admin Routes */}
                     <Route path="/admin/login" element={<AdminAuthPage />} />
                     <Route path="/admin/signup" element={<AdminAuthPage />} />
+                    <Route path="/admin/reset-password" element={<AdminResetPasswordPage />} />
                     <Route path="/admin" element={
                       <AdminProtectedRoute>
                         <AdminSearchProvider>

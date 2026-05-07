@@ -8,3 +8,8 @@ node_modules/
 # Logs
 *.log
 debug_requests.log
+
+# Debug and Test Scripts
+debug_db.js
+inspect_products.js
+test_api.js

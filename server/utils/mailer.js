@@ -125,3 +125,59 @@ export const sendSuperAdminLoginOTP = async (email, name, otp) => {
     return { success: false, error };
   }
 };
+
+/**
+ * Sends a secure password reset link email to an administrator.
+ */
+export const sendAdminPasswordResetLinkEmail = async (email, name, resetLink) => {
+  const mailOptions = {
+    from: `"Home Products Security" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: 'Administrative Password Reset Link - Action Required',
+    html: `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h2 style="color: #2563eb; margin: 0;">GMD Home Products</h2>
+          <p style="color: #64748b; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Administrative Portal</p>
+        </div>
+        
+        <div style="padding: 20px; background-color: #f8fafc; border-radius: 12px; margin-bottom: 30px;">
+          <p style="font-size: 16px; color: #0f172a;">Hello <strong>${name}</strong>,</p>
+          <p style="font-size: 14px; color: #334155; line-height: 1.6;">
+            A secure password reset link was generated for your administrative account by the Super Administrator. 
+            Please click the button below to choose a new password:
+          </p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetLink}" style="display: inline-block; padding: 14px 35px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);">Reset My Password</a>
+          </div>
+          
+          <p style="font-size: 12px; color: #64748b; word-break: break-all;">
+            If the button doesn't work, copy and paste this link into your browser:<br/>
+            <a href="${resetLink}" style="color: #2563eb;">${resetLink}</a>
+          </p>
+          
+          <p style="font-size: 13px; color: #ef4444; font-weight: bold; margin-top: 20px;">
+            ⚠️ Important: This secure link will expire in 1 hour.
+          </p>
+        </div>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f5f9; text-align: center;">
+          <p style="font-size: 12px; color: #94a3b8; margin: 0;">
+            This is an automated security notification. If you did not request this, please contact the Super Admin immediately.
+          </p>
+          <p style="font-size: 11px; color: #cbd5e1; margin-top: 5px;">&copy; 2026 GMD Home Products Marketplace</p>
+        </div>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[MAILER] Secure reset link email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    console.error("[MAILER] Error sending reset link email:", error);
+    return { success: false, error };
+  }
+};

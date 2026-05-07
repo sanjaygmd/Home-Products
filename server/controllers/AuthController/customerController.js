@@ -1,4 +1,6 @@
 import { pool } from "../../configs/db.js";
+import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { generateOtp, hashOtp } from "../../utils/otp.js";
 import { sendEmailOtp } from "../../utils/email.js";
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
@@ -44,16 +46,32 @@ export const loginCustomer = async (req, res) => {
       });
     }
 
-    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash])
-    if (!passwordMatch.rows[0].match) {
+    let isMatch = false;
+    const isBcrypt = user.password_hash && (user.password_hash.startsWith('$2a$') || user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2y$'));
+    
+    if (isBcrypt) {
+      isMatch = await bcrypt.compare(password, user.password_hash);
+    } else {
+      const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash]);
+      isMatch = !!passwordMatch.rows[0]?.match;
+    }
+
+    if (!isMatch) {
       return res.status(401).json({
         success: false,
         message: 'Invalid password'
-      })
+      });
+    }
+
+    // Lazy migration: upgrade legacy hash to bcrypt!
+    if (!isBcrypt) {
+      const newHash = await bcrypt.hash(password, 12);
+      await pool.query("UPDATE customers SET password_hash = $1 WHERE customer_id = $2", [newHash, user.customer_id]);
+      console.log(`[AUTH] Migrated legacy hash for customer ${user.email} to bcrypt successfully.`);
     }
 
     // Create Auth Session
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(user.customer_id, 'customer', ip, device);
 
@@ -128,17 +146,18 @@ export const registerCustomer = async (req, res) => {
       });
     }
 
+    const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool.query(
       `INSERT INTO customers 
       (customer_id, full_name, email, phone, password_hash, date_of_birth, gender, profile_picture_url) 
       VALUES 
-      (gen_random_uuid(), $1, $2, $3, crypt($4, gen_salt('bf')), $5, $6, $7)
+      (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)
       RETURNING customer_id, full_name, email, phone, profile_picture_url`,
-      [full_name, email, phone, password, date_of_birth || null, gender || null, profile_picture_url || null]
+      [full_name, email, phone, passwordHash, date_of_birth || null, gender || null, profile_picture_url || null]
     );
 
     // Create Auth Session automatically on register
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(result.rows[0].customer_id, 'customer', ip, device);
 
@@ -428,15 +447,36 @@ export const getMe = async (req, res) => {
 
 export const logoutCustomer = async (req, res) => {
   try {
-    const sessionId = req.sessionId;
+    let sessionId = req.sessionId;
+    
+    if (!sessionId && req.cookies) {
+      const token = req.cookies.customer_token || req.cookies.token;
+      if (token) {
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const sessionRes = await pool.query(
+          "SELECT session_id FROM auth_sessions WHERE token_hash = $1 AND is_blacklisted = false",
+          [tokenHash]
+        );
+        if (sessionRes.rows.length > 0) {
+          sessionId = sessionRes.rows[0].session_id;
+        }
+      }
+    }
+
     if (sessionId) {
       await invalidateSession(sessionId);
     }
-    res.clearCookie('token', { path: '/', httpOnly: true });
-    res.clearCookie('admin_token', { path: '/', httpOnly: true });
-    res.clearCookie('seller_token', { path: '/', httpOnly: true });
-    res.clearCookie('customer_token', { path: '/', httpOnly: true });
-    res.clearCookie('super_admin_token', { path: '/', httpOnly: true });
+    const clearOptions = { 
+      path: '/', 
+      httpOnly: true, 
+      sameSite: 'lax', 
+      secure: process.env.NODE_ENV === 'production' 
+    };
+    res.clearCookie('token', clearOptions);
+    res.clearCookie('admin_token', clearOptions);
+    res.clearCookie('seller_token', clearOptions);
+    res.clearCookie('customer_token', clearOptions);
+    res.clearCookie('super_admin_token', clearOptions);
     return res.status(200).json({ success: true, message: "Logout successful" });
   } catch (error) {
     console.error("LOGOUT ERROR:", error);

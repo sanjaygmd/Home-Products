@@ -74,6 +74,38 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
             session = result.rows[0];
         }
 
+        // 3.5 Check for idle session timeout (2 hours)
+        const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+        const lastAccessed = new Date(session.last_accessed_at || session.created_at).getTime();
+        if (Date.now() - lastAccessed > IDLE_TIMEOUT_MS) {
+            // Blacklist the session
+            await pool.query(
+                "UPDATE auth_sessions SET is_blacklisted = true WHERE session_id = $1",
+                [session.session_id]
+            );
+            
+            // Clear all potential role cookies to prevent mutually exclusive session pollution
+            const clearOptions = { 
+                path: '/', 
+                httpOnly: true, 
+                sameSite: 'lax', 
+                secure: process.env.NODE_ENV === 'production' 
+            };
+            res.clearCookie('token', clearOptions);
+            res.clearCookie('customer_token', clearOptions);
+            res.clearCookie('seller_token', clearOptions);
+            res.clearCookie('admin_token', clearOptions);
+            res.clearCookie('super_admin_token', clearOptions);
+
+            return res.status(401).json({ success: false, message: 'Session expired due to inactivity' });
+        }
+
+        // Update last_accessed_at to NOW()
+        await pool.query(
+            "UPDATE auth_sessions SET last_accessed_at = NOW() WHERE session_id = $1",
+            [session.session_id]
+        );
+
         const user = {
             id: session.user_ref_id,
             type: session.user_type,
@@ -88,8 +120,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
 
             return res.status(403).json({ 
                 success: false, 
-                message: 'Insufficient permissions',
-                debug: { userType: user.type, allowedRoles }
+                message: 'Insufficient permissions'
             });
         }
 
@@ -109,7 +140,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
 export const verifyToken = requireAuth([]); 
 
 /**
- * Optional Auth (sets req.user if token present, but doesn't block)
+ * Optional Auth (sets req.user and req.sessionId if token present, but doesn't block)
  */
 export const optionalAuth = async (req, res, next) => {
     try {
@@ -129,17 +160,30 @@ export const optionalAuth = async (req, res, next) => {
 
         const tokenHashes = uniqueTokens.map(t => crypto.createHash('sha256').update(t).digest('hex'));
         const result = await pool.query(`
-            SELECT user_ref_id, user_type 
+            SELECT session_id, user_ref_id, user_type, last_accessed_at, created_at 
             FROM auth_sessions 
             WHERE token_hash = ANY($1) AND is_blacklisted = false AND expires_at > NOW()
             LIMIT 1
         `, [tokenHashes]);
 
         if (result.rows.length > 0) {
-            req.user = {
-                id: result.rows[0].user_ref_id,
-                type: result.rows[0].user_type
-            };
+            const session = result.rows[0];
+            const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+            const lastAccessed = new Date(session.last_accessed_at || session.created_at).getTime();
+            
+            if (Date.now() - lastAccessed <= IDLE_TIMEOUT_MS) {
+                req.sessionId = session.session_id;
+                req.user = {
+                    id: session.user_ref_id,
+                    type: session.user_type
+                };
+                
+                // Update last accessed in background
+                pool.query(
+                    "UPDATE auth_sessions SET last_accessed_at = NOW() WHERE session_id = $1",
+                    [session.session_id]
+                ).catch(() => {});
+            }
         }
         next();
     } catch (error) {

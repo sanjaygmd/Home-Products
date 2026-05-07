@@ -1,4 +1,5 @@
 import { pool } from "../../configs/db.js";
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,16 +10,64 @@ import { logAudit } from "../../utils/auditLogger.js";
 import { processAutoPayout } from "../PayoutController.js";
 import { pushOrderToShiprocket, createShiprocketReturn } from "../ShipmentController.js";
 import { sendOrderStatusNotifications } from "../../utils/notifications.js";
-import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP } from "../../utils/mailer.js";
+import { sendAdminPasswordResetEmail, sendSuperAdminLoginOTP, sendAdminPasswordResetLinkEmail } from "../../utils/mailer.js";
 import { isPasswordStrong } from "../../utils/validation.js";
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
-const superAdminLoginOtps = new Map();
-const resetOtps = new Map();
+const generateSecureOTP = () => {
+  return crypto.randomInt(100000, 1000000).toString();
+};
+
+const saveOtp = async (email, type, otp, expires, metadata = {}) => {
+  await pool.query(
+    `INSERT INTO persistent_otps (email, otp_type, otp_code, attempts, expires_at, metadata)
+     VALUES ($1, $2, $3, 0, $4, $5)
+     ON CONFLICT (email, otp_type) 
+     DO UPDATE SET otp_code = $3, attempts = 0, expires_at = $4, metadata = $5, created_at = NOW()`,
+    [email, type, otp, new Date(expires), JSON.stringify(metadata)]
+  );
+};
+
+const getOtp = async (email, type) => {
+  const res = await pool.query(
+    "SELECT * FROM persistent_otps WHERE email = $1 AND otp_type = $2",
+    [email, type]
+  );
+  if (res.rows.length === 0) return null;
+  const row = res.rows[0];
+  return {
+    otp: row.otp_code,
+    expires: new Date(row.expires_at).getTime(),
+    attempts: row.attempts,
+    user: row.metadata
+  };
+};
+
+const deleteOtp = async (email, type) => {
+  await pool.query(
+    "DELETE FROM persistent_otps WHERE email = $1 AND otp_type = $2",
+    [email, type]
+  );
+};
+
+const incrementOtpAttempts = async (email, type) => {
+  await pool.query(
+    "UPDATE persistent_otps SET attempts = attempts + 1 WHERE email = $1 AND otp_type = $2",
+    [email, type]
+  );
+};
 
 
 export const registerAdmin = async (req, res) => {
   try {
     const { name, email, password, masterKey, type = 'admin' } = req.body;
+
+    const ALLOWED_TYPES = ['admin', 'super_admin'];
+    if (!ALLOWED_TYPES.includes(type)) {
+      return res.status(400).json({ success: false, message: "Invalid administrative account type." });
+    }
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
@@ -42,7 +91,15 @@ export const registerAdmin = async (req, res) => {
     const EXPECTED_MASTER_KEY = keyRes.rows[0]?.master_key || process.env.MASTER_SECURITY_KEY;
 
     if (hasUsers) {
-      if (!masterKey || masterKey !== EXPECTED_MASTER_KEY) {
+      let isMasterKeyValid = false;
+      const isExpectedBcrypt = EXPECTED_MASTER_KEY && (EXPECTED_MASTER_KEY.startsWith('$2a$') || EXPECTED_MASTER_KEY.startsWith('$2b$') || EXPECTED_MASTER_KEY.startsWith('$2y$'));
+      if (isExpectedBcrypt) {
+        isMasterKeyValid = await bcrypt.compare(masterKey, EXPECTED_MASTER_KEY);
+      } else {
+        isMasterKeyValid = (masterKey === EXPECTED_MASTER_KEY);
+      }
+
+      if (!masterKey || !isMasterKeyValid) {
         return res.status(403).json({
           success: false,
           message: `Administrative registration for ${type} is restricted. Please provide a valid Master Security Key.`
@@ -55,18 +112,21 @@ export const registerAdmin = async (req, res) => {
       return res.status(409).json({ success: false, message: `Email already registered as ${type}` });
     }
 
+    const passwordHash = await bcrypt.hash(password, 12);
+    const masterKeyToStore = await bcrypt.hash(masterKey || process.env.MASTER_SECURITY_KEY || 'default_master_key_999', 12);
+    
     const result = await pool.query(
       `INSERT INTO ${table} 
        (${idCol}, name, email, password_hash, role, is_active, created_at, updated_at${type === 'super_admin' ? ', master_key' : ''}) 
        VALUES 
-       (gen_random_uuid(), $1, $2, crypt($3, gen_salt('bf')), $4, true, NOW(), NOW()${type === 'super_admin' ? ', $5' : ''})
+       (gen_random_uuid(), $1, $2, $3, $4, true, NOW(), NOW()${type === 'super_admin' ? ', $5' : ''})
        RETURNING ${idCol} as id, name, email, role`,
-      type === 'super_admin' ? [name, email, password, type, EXPECTED_MASTER_KEY] : [name, email, password, type]
+      type === 'super_admin' ? [name, email, passwordHash, type, masterKeyToStore] : [name, email, passwordHash, type]
     );
 
     const user = result.rows[0];
 
-    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(user.id, type, ip, device);
 
@@ -104,6 +164,10 @@ export const loginAdmin = async (req, res) => {
   try {
     const { email, password, type = 'admin' } = req.body;
 
+    const ALLOWED_TYPES = ['admin', 'super_admin'];
+    if (!ALLOWED_TYPES.includes(type)) {
+      return res.status(400).json({ success: false, message: "Invalid administrative account type." });
+    }
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
@@ -112,9 +176,8 @@ export const loginAdmin = async (req, res) => {
     const table = type === 'super_admin' ? 'super_admins' : 'admins';
     const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
 
-    const result = await pool.query(`SELECT * FROM ${table} WHERE email = $1`, [email]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: `${type} account not found` });
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
     const user = result.rows[0];
@@ -124,20 +187,33 @@ export const loginAdmin = async (req, res) => {
       return res.status(403).json({ success: false, message: "Account is deactivated. Contact platform owner." });
     }
 
-    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash]);
-    if (!passwordMatch.rows[0].match) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    let isMatch = false;
+    const isBcrypt = user.password_hash && (user.password_hash.startsWith('$2a$') || user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2y$'));
+    
+    if (isBcrypt) {
+      isMatch = await bcrypt.compare(password, user.password_hash);
+    } else {
+      const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, user.password_hash]);
+      isMatch = !!passwordMatch.rows[0]?.match;
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
+    }
+
+    // Lazy migration: upgrade legacy hash to bcrypt!
+    if (!isBcrypt) {
+      const newHash = await bcrypt.hash(password, 12);
+      await pool.query(`UPDATE ${table} SET password_hash = $1 WHERE ${idCol} = $2`, [newHash, userId]);
+      console.log(`[AUTH] Migrated legacy hash for admin ${user.email} to bcrypt successfully.`);
     }
 
     if (type === 'super_admin') {
       // 2FA required for Super Admin
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = generateSecureOTP();
+      const expires = Date.now() + 5 * 60 * 1000;
 
-      superAdminLoginOtps.set(user.email, {
-        otp,
-        expires: Date.now() + 5 * 60 * 1000,
-        user: { ...user, userId }
-      });
+      await saveOtp(user.email, 'super_admin_2fa', otp, expires, { ...user, userId });
 
       await sendSuperAdminLoginOTP(user.email, user.name, otp);
 
@@ -151,7 +227,7 @@ export const loginAdmin = async (req, res) => {
 
     await pool.query(`UPDATE ${table} SET last_login_at = NOW() WHERE ${idCol} = $1`, [userId]);
 
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(userId, type, ip, device);
 
@@ -199,19 +275,26 @@ export const verifySuperAdminLogin = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email and OTP are required" });
     }
 
-    const loginData = superAdminLoginOtps.get(email);
+    const loginData = await getOtp(email, 'super_admin_2fa');
 
     if (!loginData) {
       return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
     }
 
     if (Date.now() > loginData.expires) {
-      superAdminLoginOtps.delete(email);
+      await deleteOtp(email, 'super_admin_2fa');
       return res.status(400).json({ success: false, message: "Verification code has expired" });
     }
 
+    if (loginData.attempts >= 5) {
+      await deleteOtp(email, 'super_admin_2fa');
+      return res.status(403).json({ success: false, message: "Too many verification attempts. Please log in again." });
+    }
+
     if (loginData.otp !== otp) {
-      return res.status(400).json({ success: false, message: "Invalid verification code" });
+      await incrementOtpAttempts(email, 'super_admin_2fa');
+      const attemptsLeft = 5 - (loginData.attempts + 1);
+      return res.status(400).json({ success: false, message: `Invalid verification code. ${attemptsLeft} attempts remaining.` });
     }
 
     const user = loginData.user;
@@ -220,7 +303,7 @@ export const verifySuperAdminLogin = async (req, res) => {
     await pool.query(`UPDATE super_admins SET last_login_at = NOW() WHERE super_admin_id = $1`, [userId]);
 
 
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
     const session = await createAuthSession(userId, 'super_admin', ip, device);
 
@@ -233,7 +316,7 @@ export const verifySuperAdminLogin = async (req, res) => {
       is_super_admin: true
     });
 
-    superAdminLoginOtps.delete(email);
+    await deleteOtp(email, 'super_admin_2fa');
 
     setSessionCookie(res, 'super_admin', session.token);
 
@@ -258,17 +341,39 @@ export const verifySuperAdminLogin = async (req, res) => {
 
 export const logoutAdmin = async (req, res) => {
   try {
-    const sessionId = req.sessionId;
+    let sessionId = req.sessionId;
+    
+    if (!sessionId && req.cookies) {
+      const token = req.cookies.admin_token || req.cookies.token;
+      if (token) {
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const sessionRes = await pool.query(
+          "SELECT session_id FROM auth_sessions WHERE token_hash = $1 AND is_blacklisted = false",
+          [tokenHash]
+        );
+        if (sessionRes.rows.length > 0) {
+          sessionId = sessionRes.rows[0].session_id;
+        }
+      }
+    }
+
     if (sessionId) {
       await invalidateSession(sessionId);
     }
-    res.clearCookie('token', { path: '/', httpOnly: true });
-    res.clearCookie('admin_token', { path: '/', httpOnly: true });
-    res.clearCookie('seller_token', { path: '/', httpOnly: true });
-    res.clearCookie('customer_token', { path: '/', httpOnly: true });
-    res.clearCookie('super_admin_token', { path: '/', httpOnly: true });
+    const clearOptions = { 
+      path: '/', 
+      httpOnly: true, 
+      sameSite: 'lax', 
+      secure: process.env.NODE_ENV === 'production' 
+    };
+    res.clearCookie('token', clearOptions);
+    res.clearCookie('admin_token', clearOptions);
+    res.clearCookie('seller_token', clearOptions);
+    res.clearCookie('customer_token', clearOptions);
+    res.clearCookie('super_admin_token', clearOptions);
     return res.status(200).json({ success: true, message: "Admin logged out" });
   } catch (error) {
+    console.error("LOGOUT ADMIN ERROR:", error);
     return res.status(500).json({ success: false, message: "Logout failed" });
   }
 };
@@ -294,6 +399,15 @@ export const updateAdminProfile = async (req, res) => {
 
     const table = req.user.type === 'super_admin' ? 'super_admins' : 'admins';
     const idCol = req.user.type === 'super_admin' ? 'super_admin_id' : 'admin_id';
+
+    // Check email uniqueness before updating
+    const emailCheck = await pool.query(
+      `SELECT 1 FROM ${table} WHERE email = $1 AND ${idCol} != $2`,
+      [email, id]
+    );
+    if (emailCheck.rows.length > 0) {
+      return res.status(400).json({ success: false, message: "Email is already in use by another account." });
+    }
 
     await pool.query(
       `UPDATE ${table} SET name = $1, email = $2, updated_at = NOW() WHERE ${idCol} = $3`,
@@ -343,16 +457,15 @@ export const requestAdminPasswordReset = async (req, res) => {
     }
 
     if (!accountInfo) {
-      return res.status(404).json({ success: false, message: "This email is not registered as an Administrator or Super Admin." });
+      return res.json({ success: true, message: "If this email is registered in our system, a verification code has been sent." });
     }
 
     // Generate a 6-digit numeric OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = generateSecureOTP();
+    const expires = Date.now() + 15 * 60 * 1000;
 
-    // Store in memory with 15 minute expiration
-    resetOtps.set(email, {
-      otp,
-      expires: Date.now() + 15 * 60 * 1000,
+    // Store in DB
+    await saveOtp(email, 'admin_reset_otp', otp, expires, {
       table,
       idCol,
       id: accountInfo[idCol]
@@ -361,7 +474,7 @@ export const requestAdminPasswordReset = async (req, res) => {
     // Send email with OTP
     await sendAdminPasswordResetEmail(email, accountInfo.name, otp);
 
-    res.json({ success: true, message: "A verification code has been sent to your registered email." });
+    res.json({ success: true, message: "If this email is registered in our system, a verification code has been sent." });
   } catch (error) {
     console.error("PWD RESET REQUEST ERROR:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -387,29 +500,37 @@ export const verifyAdminPasswordReset = async (req, res) => {
     }
 
 
-    const resetData = resetOtps.get(email);
+    const resetData = await getOtp(email, 'admin_reset_otp');
 
     if (!resetData) {
       return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
     }
 
     if (Date.now() > resetData.expires) {
-      resetOtps.delete(email);
+      await deleteOtp(email, 'admin_reset_otp');
       return res.status(400).json({ success: false, message: "Verification code has expired" });
     }
 
-    if (resetData.otp !== otp) {
-      return res.status(400).json({ success: false, message: "Invalid verification code" });
+    if (resetData.attempts >= 5) {
+      await deleteOtp(email, 'admin_reset_otp');
+      return res.status(403).json({ success: false, message: "Too many verification attempts. Please request a new code." });
     }
 
-    // Update the password
+    if (resetData.otp !== otp) {
+      await incrementOtpAttempts(email, 'admin_reset_otp');
+      const attemptsLeft = 5 - (resetData.attempts + 1);
+      return res.status(400).json({ success: false, message: `Invalid verification code. ${attemptsLeft} attempts remaining.` });
+    }
+
+    // Update the password using bcrypt
+    const bcryptHash = await bcrypt.hash(newPassword, 12);
     await pool.query(
-      `UPDATE ${resetData.table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${resetData.idCol} = $2`,
-      [newPassword, resetData.id]
+      `UPDATE ${resetData.user.table} SET password_hash = $1, updated_at = NOW() WHERE ${resetData.user.idCol} = $2`,
+      [bcryptHash, resetData.user.id]
     );
 
     // Clear the OTP
-    resetOtps.delete(email);
+    await deleteOtp(email, 'admin_reset_otp');
 
     res.json({ success: true, message: "Password has been successfully reset" });
   } catch (error) {
@@ -560,6 +681,14 @@ export const getAdminDashboardData = async (req, res) => {
  */
 export const getAuditLogs = async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const countResult = await pool.query("SELECT COUNT(*) FROM audit_logs");
+    const totalLogs = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalLogs / limit);
+
     const logsQuery = `
       SELECT 
         al.*,
@@ -569,9 +698,9 @@ export const getAuditLogs = async (req, res) => {
       LEFT JOIN admins a ON al.admin_id = a.admin_id
       LEFT JOIN sellers s ON al.admin_id = s.seller_id
       ORDER BY al.created_at DESC
-      LIMIT 100
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(logsQuery);
+    const result = await pool.query(logsQuery, [limit, offset]);
 
     return res.status(200).json({
       success: true,
@@ -584,7 +713,13 @@ export const getAuditLogs = async (req, res) => {
           hour: '2-digit',
           minute: '2-digit'
         })
-      }))
+      })),
+      pagination: {
+        total: totalLogs,
+        page,
+        limit,
+        totalPages
+      }
     });
   } catch (error) {
     console.error("GET AUDIT LOGS ERROR:", error);
@@ -1522,13 +1657,16 @@ export const changeAdminPassword = async (req, res) => {
     const targetInfo = await pool.query(`SELECT name, email FROM ${table} WHERE ${idCol} = $1`, [id]);
     const { name, email } = targetInfo.rows[0];
 
-    await pool.query(
-      `UPDATE ${table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${idCol} = $2`,
-      [newPassword, id]
+    const token = jwt.sign(
+      { id, email, table, idCol, purpose: 'admin_password_reset' },
+      process.env.JWT_SECRET || 'gmd_secret_key_999',
+      { expiresIn: '1h' }
     );
 
+    const resetLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/admin/reset-password?token=${token}`;
+
     // Send automated email via Nodemailer
-    await sendAdminPasswordResetEmail(email, name, newPassword);
+    await sendAdminPasswordResetLinkEmail(email, name, resetLink);
 
     await logAudit({
       admin_id: req.user.id,
@@ -1918,9 +2056,10 @@ export const updateMasterKey = async (req, res) => {
       return res.status(400).json({ success: false, message: "Master Key must be at least 8 characters for security." });
     }
 
+    const masterKeyHash = await bcrypt.hash(newMasterKey, 12);
     await pool.query(
       "UPDATE super_admins SET master_key = $1, updated_at = NOW()",
-      [newMasterKey]
+      [masterKeyHash]
     );
 
     await logAudit({
@@ -1968,15 +2107,25 @@ export const updateAdminPasswordSelf = async (req, res) => {
     }
 
     const user = result.rows[0];
-    const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [currentPassword, user.password_hash]);
+    
+    let isMatch = false;
+    const isBcrypt = user.password_hash && (user.password_hash.startsWith('$2a$') || user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2y$'));
+    
+    if (isBcrypt) {
+      isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    } else {
+      const passwordMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [currentPassword, user.password_hash]);
+      isMatch = !!passwordMatch.rows[0]?.match;
+    }
 
-    if (!passwordMatch.rows[0].match) {
+    if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid current password" });
     }
 
+    const passwordHash = await bcrypt.hash(newPassword, 12);
     await pool.query(
-      `UPDATE ${table} SET password_hash = crypt($1, gen_salt('bf')), updated_at = NOW() WHERE ${idCol} = $2`,
-      [newPassword, id]
+      `UPDATE ${table} SET password_hash = $1, updated_at = NOW() WHERE ${idCol} = $2`,
+      [passwordHash, id]
     );
 
     await logAudit({
@@ -1997,5 +2146,64 @@ export const updateAdminPasswordSelf = async (req, res) => {
   } catch (error) {
     console.error("UPDATE PASSWORD SELF ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to update password" });
+  }
+};
+
+/**
+ * Reset Admin Password Via Secure Signed Link
+ */
+export const resetPasswordViaLink = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ success: false, message: "Token and new password are required." });
+    }
+
+    if (!isPasswordStrong(newPassword)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+      });
+    }
+
+    // Verify JWT
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'gmd_secret_key_999');
+    } catch (err) {
+      return res.status(400).json({ success: false, message: "Invalid or expired password reset link." });
+    }
+
+    if (decoded.purpose !== 'admin_password_reset') {
+      return res.status(400).json({ success: false, message: "Invalid token usage purpose." });
+    }
+
+    const { id, email, table, idCol } = decoded;
+
+    // Check account exists
+    const checkRes = await pool.query(`SELECT name FROM ${table} WHERE ${idCol} = $1 AND email = $2`, [id, email]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Account not found or email has changed." });
+    }
+
+    // Hash and update password
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await pool.query(
+      `UPDATE ${table} SET password_hash = $1, updated_at = NOW() WHERE ${idCol} = $2`,
+      [passwordHash, id]
+    );
+
+    // Send notification to super admins
+    await pool.query(
+      `INSERT INTO notifications (notification_id, type, message, created_at, is_read) 
+       VALUES (gen_random_uuid(), 'ADMIN_PASSWORD_CHANGED', $1, NOW(), false)`,
+      [`Administrator ${checkRes.rows[0].name || 'Unknown'} (${email}) has successfully reset their password via secure link.`]
+    );
+
+    return res.status(200).json({ success: true, message: "Your password has been reset successfully. You can now log in." });
+  } catch (error) {
+    console.error("RESET PASSWORD VIA LINK ERROR:", error);
+    return res.status(500).json({ success: false, message: "Internal server error during password reset." });
   }
 };

@@ -93,14 +93,14 @@ export const getAllCoupons = async (req, res) => {
 
 // Create a new coupon
 export const createCoupon = async (req, res) => {
-    const { code, type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
+    const { code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
 
     try {
         const result = await pool.query(
-            `INSERT INTO coupons (coupon_id, code, type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)
-             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            `INSERT INTO coupons (coupon_id, code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
              RETURNING *`,
-            [code.toUpperCase(), type || 'percentage', discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active ?? true, admin_id]
+            [code.toUpperCase(), type || 'percentage', discount_percent || 0, discount_amount || 0, max_discount, min_order_value, valid_until, max_usage, is_active ?? true, admin_id]
         );
         
         const newCoupon = result.rows[0];
@@ -126,7 +126,7 @@ export const createCoupon = async (req, res) => {
 // Update a coupon
 export const updateCoupon = async (req, res) => {
     const { id } = req.params;
-    const { code, type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
+    const { code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
     try {
         // Get old values first
         const oldRes = await pool.query("SELECT * FROM coupons WHERE coupon_id = $1", [id]);
@@ -140,16 +140,17 @@ export const updateCoupon = async (req, res) => {
              SET code = COALESCE($1, code),
                  type = COALESCE($2, type),
                  discount_percent = COALESCE($3, discount_percent),
-                 max_discount = COALESCE($4, max_discount),
-                 min_order_value = COALESCE($5, min_order_value),
-                 valid_until = COALESCE($6, valid_until),
-                 max_usage = COALESCE($7, max_usage),
-                 is_active = COALESCE($8, is_active),
-                 admin_id = COALESCE($9, admin_id),
+                 discount_amount = COALESCE($4, discount_amount),
+                 max_discount = COALESCE($5, max_discount),
+                 min_order_value = COALESCE($6, min_order_value),
+                 valid_until = COALESCE($7, valid_until),
+                 max_usage = COALESCE($8, max_usage),
+                 is_active = COALESCE($9, is_active),
+                 admin_id = COALESCE($10, admin_id),
                  updated_at = NOW()
-             WHERE coupon_id = $10
+             WHERE coupon_id = $11
              RETURNING *`,
-            [code?.toUpperCase(), type, discount_percent, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, id]
+            [code?.toUpperCase(), type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, id]
         );
         
         const updatedCoupon = result.rows[0];
