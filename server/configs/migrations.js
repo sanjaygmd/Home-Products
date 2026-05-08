@@ -69,6 +69,25 @@ export const runSchemaMigrations = async () => {
         ADD COLUMN IF NOT EXISTS commission_rate DECIMAL(5,2) DEFAULT NULL
     `);
 
+    // 7. Ensure user_profile column exists on auth_sessions table
+    await pool.query(`
+        ALTER TABLE auth_sessions 
+        ADD COLUMN IF NOT EXISTS user_profile JSONB DEFAULT '{}'::jsonb
+    `);
+
+    // 8. Ensure unique coupon customer constraint is applied to pre-existing tables safely
+    try {
+      await pool.query(`
+          ALTER TABLE coupon_usage 
+          ADD CONSTRAINT unique_coupon_customer UNIQUE (coupon_id, customer_id)
+      `);
+      console.log("[MIGRATOR] unique_coupon_customer constraint added successfully");
+    } catch (err) {
+      if (!err.message.includes('already exists')) {
+        console.warn("[MIGRATOR] Warning when adding unique_coupon_customer constraint:", err.message);
+      }
+    }
+
     console.log("[MIGRATOR] All schema migrations ran successfully.");
   } catch (err) {
     console.error("[MIGRATOR] Schema migrations FAILED:", err.message);

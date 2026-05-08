@@ -1,6 +1,6 @@
 import { pool } from "../configs/db.js";
 import { logAction } from "../utils/auditLogger.js";
-import { sanitizeText, sanitizeDescription } from "../utils/sanitizer.js";
+import { sanitizeText, sanitizeDescription, isValidImageUrl } from "../utils/sanitizer.js";
 
 export const addProduct = async (req, res) => {
     try {
@@ -33,6 +33,19 @@ export const addProduct = async (req, res) => {
                 success: false,
                 message: "Required fields missing (name, price, category_id)"
             });
+        }
+
+        // Validate image URLs to prevent SSRF and Content-Injection
+        if (images && Array.isArray(images)) {
+            for (const img of images) {
+                const url = typeof img === 'string' ? img : img.url;
+                if (!isValidImageUrl(url)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid image URL format or unsafe protocol/host detected."
+                    });
+                }
+            }
         }
 
         const cleanDescription = sanitizeDescription(description);

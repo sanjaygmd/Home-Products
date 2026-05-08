@@ -77,7 +77,7 @@ authRoutes.get('/me', verifyToken, getMe);
 // Customer Routes
 authRoutes.post('/customer/register', registerCustomer);
 authRoutes.post('/customer/login', loginCustomer);
-authRoutes.post('/customer/logout', optionalAuth, logoutCustomer);
+authRoutes.post('/customer/logout', verifyToken, logoutCustomer);
 authRoutes.post('/customer-onboarding/:id', requireAuth(['customer', 'admin', 'super_admin']), customerOnboarding);
 authRoutes.put('/customer/update/:id', requireAuth(['customer', 'admin', 'super_admin']), updateCustomer);
 authRoutes.get('/customer/stats/:id', requireAuth(['customer', 'admin', 'super_admin']), getCustomerStats);
@@ -90,7 +90,7 @@ authRoutes.get('/customer/:id', requireAuth(['customer', 'admin', 'super_admin']
 // Seller Routes
 authRoutes.post('/seller/register', registerSeller);
 authRoutes.post('/seller/login', loginSeller);
-authRoutes.post('/seller/logout', optionalAuth, logoutSeller);
+authRoutes.post('/seller/logout', verifyToken, logoutSeller);
 authRoutes.post('/seller-onboarding/:id', requireAuth(['seller', 'admin', 'super_admin']), sellerOnboarding);
 authRoutes.get('/seller/stats/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerStats);
 authRoutes.get('/seller/dashboard/:id', requireAuth(['seller', 'admin', 'super_admin']), getSellerDashboardData);

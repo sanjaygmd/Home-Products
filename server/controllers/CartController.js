@@ -43,7 +43,7 @@ const syncCartSummary = async (client, cart_id) => {
 export const getCart = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.id !== customer_id && req.user.type !== 'admin') {
+    if (req.user.id !== customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: 'Unauthorized access to cart' });
     }
 
@@ -104,7 +104,7 @@ export const addToCart = async (req, res) => {
         return res.status(400).json({ success: false, message: 'customer_id, product_id and price are required' });
     }
 
-    if (req.user.id !== customer_id && req.user.type !== 'admin') {
+    if (req.user.id !== customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only add items to your own cart' });
     }
 
@@ -268,7 +268,7 @@ export const updateCartItem = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Cart item not found' });
         }
 
-        if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
+        if (req.user.id !== ownershipCheck.rows[0].customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
         }
 
@@ -277,14 +277,16 @@ export const updateCartItem = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Quantity cannot exceed 100 units per item.' });
         }
 
+        let dbPrice = 0;
         if (!isNaN(qty) && qty > 0) {
-            // Fetch actual stock
+            // Fetch actual stock and price
             const stockCheck = await client.query(
                 `SELECT 
                     ci.product_id, 
                     ci.variant_id,
                     p.name AS product_name,
-                    COALESCE(pv.stock_quantity, p.stock_quantity) AS stock_quantity
+                    COALESCE(pv.stock_quantity, p.stock_quantity) AS stock_quantity,
+                    COALESCE(pv.price, p.price) AS current_price
                  FROM cart_items ci
                  JOIN products p ON ci.product_id = p.product_id
                  LEFT JOIN product_variants pv ON ci.variant_id = pv.variant_id
@@ -296,13 +298,14 @@ export const updateCartItem = async (req, res) => {
                 return res.status(404).json({ success: false, message: 'Cart item or associated product not found.' });
             }
 
-            const { stock_quantity, product_name } = stockCheck.rows[0];
+            const { stock_quantity, product_name, current_price } = stockCheck.rows[0];
             if (qty > stock_quantity) {
                 return res.status(400).json({ 
                     success: false, 
                     message: `Cannot update quantity to ${qty}. Only ${stock_quantity} units of '${product_name}' are currently in stock.` 
                 });
             }
+            dbPrice = parseFloat(current_price);
         }
 
         await client.query('BEGIN');
@@ -311,10 +314,10 @@ export const updateCartItem = async (req, res) => {
         if (quantity <= 0) {
             result = await client.query('DELETE FROM cart_items WHERE cart_item_id = $1 RETURNING cart_id', [cart_item_id]);
         } else {
-            // Update quantity in cart_items
+            // Update quantity and price in cart_items using latest DB price
             result = await client.query(
-                'UPDATE cart_items SET quantity = $1, updated_at = NOW() WHERE cart_item_id = $2 RETURNING cart_id',
-                [quantity, cart_item_id]
+                'UPDATE cart_items SET quantity = $1, price = $2, updated_at = NOW() WHERE cart_item_id = $3 RETURNING cart_id',
+                [quantity, dbPrice, cart_item_id]
             );
         }
 
@@ -352,7 +355,7 @@ export const removeFromCart = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Cart item not found' });
         }
 
-        if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
+        if (req.user.id !== ownershipCheck.rows[0].customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
         }
 
@@ -380,7 +383,7 @@ export const removeFromCart = async (req, res) => {
 export const clearCart = async (req, res) => {
     const { customer_id } = req.params;
 
-    if (req.user.id !== customer_id && req.user.type !== 'admin') {
+    if (req.user.id !== customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only clear your own cart' });
     }
 

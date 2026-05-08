@@ -112,7 +112,8 @@ export const registerAdmin = async (req, res) => {
       });
     }
 
-    const existing = await pool.query(`SELECT ${idCol} FROM ${table} WHERE email = $1`, [email]);
+    const sanitizedEmail = email.toLowerCase().trim();
+    const existing = await pool.query(`SELECT ${idCol} FROM ${table} WHERE email = $1`, [sanitizedEmail]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ success: false, message: `Email already registered as ${type}` });
     }
@@ -126,14 +127,14 @@ export const registerAdmin = async (req, res) => {
        VALUES 
        (gen_random_uuid(), $1, $2, $3, $4, true, NOW(), NOW()${type === 'super_admin' ? ', $5' : ''})
        RETURNING ${idCol} as id, name, email, role`,
-      type === 'super_admin' ? [name, email, passwordHash, type, masterKeyToStore] : [name, email, passwordHash, type]
+      type === 'super_admin' ? [name, sanitizedEmail, passwordHash, type, masterKeyToStore] : [name, sanitizedEmail, passwordHash, type]
     );
 
     const user = result.rows[0];
 
     const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(user.id, type, ip, device);
+    const session = await createAuthSession(user.id, type, ip, device, { name: user.name, email: user.email });
 
     await logAudit({
       admin_id: user.id,
@@ -251,7 +252,7 @@ export const loginAdmin = async (req, res) => {
 
     const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(userId, type, ip, device);
+    const session = await createAuthSession(userId, type, ip, device, { name: user.name, email: user.email });
 
     // Log the successful login
     await logAudit({
@@ -330,7 +331,7 @@ export const verifySuperAdminLogin = async (req, res) => {
 
     const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(userId, 'super_admin', ip, device);
+    const session = await createAuthSession(userId, 'super_admin', ip, device, { name: user.name, email: user.email });
 
     await logAudit({
       admin_id: userId,

@@ -168,7 +168,6 @@ app.use('/product', productRoutes);
 app.use('/cart', cartRoutes);
 app.use('/wishlist', wishlistRoutes);
 app.use('/orders', orderRoutes);
-app.use('/order', orderRoutes);
 app.use('/shipping', shiprocketRoutes);
 
 // Removed /schema-test for security

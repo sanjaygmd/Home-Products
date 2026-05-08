@@ -5,7 +5,7 @@ import { addShiprocketPickupLocation } from '../utils/shiprocket.js';
 export const getSellerPickups = async (req, res) => {
     const { sellerId } = req.params;
 
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: 'Unauthorized access to pickup locations' });
     }
 
@@ -29,7 +29,7 @@ export const addPickupLocation = async (req, res) => {
         address_line_1, city, state, pincode, is_default 
     } = req.body;
 
-    if (req.user.id !== seller_id && req.user.type !== 'admin') {
+    if (req.user.id !== seller_id && !['admin', 'super_admin'].includes(req.user.type)) {
         return res.status(403).json({ success: false, message: 'Unauthorized: You can only add pickup locations for your own account' });
     }
 
@@ -108,7 +108,7 @@ export const updatePickupLocation = async (req, res) => {
         }
         const seller_id = sellerRes.rows[0].seller_id;
 
-        if (req.user.id !== seller_id && req.user.type !== 'admin') {
+        if (req.user.id !== seller_id && !['admin', 'super_admin'].includes(req.user.type)) {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this pickup location' });
         }
 
@@ -166,7 +166,7 @@ export const deletePickupLocation = async (req, res) => {
         const sellerRes = await pool.query("SELECT seller_id FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);
         if (sellerRes.rows.length > 0) {
             const seller_id = sellerRes.rows[0].seller_id;
-            if (req.user.id !== seller_id && req.user.type !== 'admin') {
+            if (req.user.id !== seller_id && !['admin', 'super_admin'].includes(req.user.type)) {
                 return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this pickup location' });
             }
             await pool.query("DELETE FROM seller_pickup_location WHERE pickup_id = $1", [pickupId]);

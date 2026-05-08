@@ -8,6 +8,7 @@ node_modules/
 # Logs
 *.log
 debug_requests.log
+returns_audit_log.txt
 
 # Debug and Test Scripts
 debug_db.js

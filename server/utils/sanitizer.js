@@ -82,3 +82,46 @@ export const sanitizeDescription = (html) => {
 
   return clean.trim();
 };
+
+/**
+ * Validate image URLs to protect against SSRF and Content-Injection.
+ * Enforces http/https, blocks private subnet IPs/localhost/link-local, and cleans unsafe characters.
+ */
+export const isValidImageUrl = (urlStr) => {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+
+  try {
+    // Enforce basic character safety to block injection
+    if (urlStr.includes('<') || urlStr.includes('>') || urlStr.includes('"') || urlStr.includes("'")) {
+      return false;
+    }
+
+    const parsed = new URL(urlStr);
+
+    // Enforce allowed protocols
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    const cleanHost = hostname.replace(/^\[|\]$/g, '');
+
+    // Check if hostname is loopback or local hostnames
+    const isLoopback = cleanHost === 'localhost' || cleanHost === '127.0.0.1' || cleanHost === '::1';
+
+    // Check for private IPv4 subnets
+    // 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 169.254.x.x (AWS metadata), 0.0.0.0
+    const isPrivateIpv4 = /^(127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0)$/.test(cleanHost);
+
+    // Check for private IPv6 ranges
+    const isPrivateIpv6 = cleanHost.startsWith('fe80:') || cleanHost.startsWith('fc00:') || cleanHost.startsWith('fd00:') || cleanHost === '::';
+
+    if (isLoopback || isPrivateIpv4 || isPrivateIpv6) {
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    return false;
+  }
+};

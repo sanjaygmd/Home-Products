@@ -128,7 +128,7 @@ export const loginSeller = async (req, res) => {
     // Create Auth Session
     const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(user.seller_id, 'seller', ip, device);
+    const session = await createAuthSession(user.seller_id, 'seller', ip, device, { name: user.full_name, email: user.email });
 
     setSessionCookie(res, 'seller', session.token);
 
@@ -239,7 +239,7 @@ export const registerSeller = async (req, res) => {
     // Create Auth Session automatically on register
     const ip = req.ip || req.socket.remoteAddress;
     const device = { agent: req.get('User-Agent') };
-    const session = await createAuthSession(result.rows[0].seller_id, 'seller', ip, device);
+    const session = await createAuthSession(result.rows[0].seller_id, 'seller', ip, device, { name: result.rows[0].full_name, email: result.rows[0].email });
 
     setSessionCookie(res, 'seller', session.token);
 
@@ -274,7 +274,7 @@ export const sellerOnboarding = async (req, res) => {
     }
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -396,7 +396,7 @@ export const getSellerStats = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -487,7 +487,7 @@ export const getSellerDashboardData = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -546,7 +546,7 @@ export const getSellerOrders = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -571,7 +571,7 @@ export const getSellerCustomers = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -596,7 +596,7 @@ export const getSellerProfile = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -624,7 +624,7 @@ export const updateSellerProfile = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
     const { name, email, storeName, phone, address } = req.body;
@@ -656,7 +656,7 @@ export const getSellerPayments = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -701,7 +701,7 @@ export const getSellerFinanceAnalytics = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -1077,7 +1077,7 @@ export const getSellerNotifications = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -1104,7 +1104,7 @@ export const markNotificationRead = async (req, res) => {
     if (notifCheck.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Notification not found" });
     }
-    if (notifCheck.rows[0].seller_id !== req.user.id && req.user.type !== 'admin') {
+    if (notifCheck.rows[0].seller_id !== req.user.id && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -1124,7 +1124,7 @@ export const getSellerReturns = async (req, res) => {
     const { id: sellerId } = req.params;
 
     // Ownership Check
-    if (req.user.id !== sellerId && req.user.type !== 'admin') {
+    if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
     }
 
@@ -1192,7 +1192,7 @@ export const markReturnReceived = async (req, res) => {
       return res.status(404).json({ success: false, message: "Return request not found" });
     }
 
-    if (rrRes.rows[0].seller_id !== sellerId && req.user.type !== 'admin') {
+    if (rrRes.rows[0].seller_id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       await client.query('ROLLBACK');
       return res.status(403).json({ success: false, message: "Unauthorized access to this return request" });
     }
@@ -1270,7 +1270,7 @@ export const resolveReturnRequestBySeller = async (req, res) => {
 
     const rr = rrRes.rows[0];
 
-    if (rr.seller_id !== sellerId && req.user.type !== 'admin') {
+    if (rr.seller_id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       await client.query('ROLLBACK');
       return res.status(403).json({ success: false, message: "Unauthorized access to this return request" });
     }
