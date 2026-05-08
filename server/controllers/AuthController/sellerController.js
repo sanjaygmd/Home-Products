@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 import { createShiprocketReturn } from "../ShipmentController.js";
+import { sanitizeText, sanitizeDescription } from "../../utils/sanitizer.js";
 
 export const logoutSeller = async (req, res) => {
   try {
@@ -68,17 +69,30 @@ export const loginSeller = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
+    const startTime = Date.now();
+    const ensureConstantTime = async () => {
+      const elapsed = Date.now() - startTime;
+      const delay = Math.max(0, 450 - elapsed);
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    };
+
     const existingUser = await pool.query("SELECT * FROM sellers WHERE email = $1", [email])
     if (existingUser.rows.length === 0) {
-      return res.status(404).json({
+      const dummyHash = '$2b$12$DummyHashDummyHashDummyHashDummyHashDummyHashDummy';
+      await bcrypt.compare(password, dummyHash);
+      await ensureConstantTime();
+      return res.status(401).json({
         success: false,
-        message: 'Seller not found, try to register'
+        message: 'Invalid email or password'
       })
     }
 
     const user = existingUser.rows[0];
 
     if (!user.is_active) {
+      await ensureConstantTime();
       return res.status(403).json({
         success: false,
         message: user.block_reason || 'Your seller account has been restricted. Please contact administration.',
@@ -97,9 +111,10 @@ export const loginSeller = async (req, res) => {
     }
 
     if (!isMatch) {
+      await ensureConstantTime();
       return res.status(401).json({
         success: false,
-        message: 'Invalid password'
+        message: 'Invalid email or password'
       });
     }
 
@@ -116,6 +131,8 @@ export const loginSeller = async (req, res) => {
     const session = await createAuthSession(user.seller_id, 'seller', ip, device);
 
     setSessionCookie(res, 'seller', session.token);
+
+    await ensureConstantTime();
 
     return res.status(200).json({
       success: true,
@@ -202,13 +219,13 @@ export const registerSeller = async (req, res) => {
   VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7) 
   RETURNING seller_id, full_name, email, phone, store_name, is_verified`,
       [
-        full_name,
+        sanitizeText(full_name),
         email,
-        phone,
+        sanitizeText(phone),
         passwordHash,
-        store_name,
+        store_name ? sanitizeText(store_name) : null,
         store_logo,
-        store_description,
+        store_description ? sanitizeDescription(store_description) : null,
       ]
     );
 
@@ -216,7 +233,7 @@ export const registerSeller = async (req, res) => {
     await pool.query(
       `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
        VALUES (gen_random_uuid(), 'new_seller', $1, NOW(), false)`,
-      [`New Seller Registration: ${full_name} (${store_name}) has joined the platform!`]
+      [`New Seller Registration: ${sanitizeText(full_name)} (${store_name ? sanitizeText(store_name) : 'No Store Name'}) has joined the platform!`]
     );
 
     // Create Auth Session automatically on register
@@ -299,7 +316,14 @@ export const sellerOnboarding = async (req, res) => {
        (address_id, seller_id, address_line_1, city, state, pincode, country)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [sellerId, address_line1, city, state, pincode, country]
+      [
+        sellerId, 
+        address_line1 ? sanitizeText(address_line1) : null, 
+        city ? sanitizeText(city) : null, 
+        state ? sanitizeText(state) : null, 
+        pincode ? sanitizeText(pincode) : null, 
+        country ? sanitizeText(country) : null
+      ]
     );
 
     const bank = await pool.query(
@@ -309,12 +333,12 @@ export const sellerOnboarding = async (req, res) => {
        RETURNING *`,
       [
         sellerId,
-        upiId,
-        bankName,
-        ifsc,
-        accountNumber,
-        accountHolder,
-        accountType
+        upiId ? sanitizeText(upiId) : null,
+        bankName ? sanitizeText(bankName) : null,
+        ifsc ? sanitizeText(ifsc) : null,
+        accountNumber ? sanitizeText(accountNumber) : null,
+        accountHolder ? sanitizeText(accountHolder) : null,
+        accountType ? sanitizeText(accountType) : null
       ]
     );
 
@@ -324,14 +348,31 @@ export const sellerOnboarding = async (req, res) => {
         pickup_id, seller_id, location_name, contact_name, contact_phone, 
         address_line_1, city, state, pincode, is_default, is_active, created_at
       ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, true, true, NOW())`,
-      [sellerId, 'Primary Warehouse', businessName || storeName, sellerCheck.rows[0].phone, address_line1, city, state, pincode]
+      [
+        sellerId, 
+        'Primary Warehouse', 
+        (businessName || storeName) ? sanitizeText(businessName || storeName) : 'Primary Store', 
+        sellerCheck.rows[0].phone, 
+        address_line1 ? sanitizeText(address_line1) : '', 
+        city ? sanitizeText(city) : '', 
+        state ? sanitizeText(state) : '', 
+        pincode ? sanitizeText(pincode) : ''
+      ]
     );
 
     await pool.query(
       `UPDATE sellers 
        SET store_name = $1, store_logo = $2, store_description = $3, aadhar = $4, pan = $5, gstin = $6, is_verified = true 
        WHERE seller_id = $7`,
-      [storeName || businessName, logo_url, storeDescription, aadhar, pan, gst, sellerId]
+      [
+        (storeName || businessName) ? sanitizeText(storeName || businessName) : null, 
+        logo_url, 
+        storeDescription ? sanitizeDescription(storeDescription) : null, 
+        aadhar ? sanitizeText(aadhar) : null, 
+        pan ? sanitizeText(pan) : null, 
+        gst ? sanitizeText(gst) : null, 
+        sellerId
+      ]
     );
 
     return res.status(200).json({

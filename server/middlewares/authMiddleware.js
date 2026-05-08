@@ -40,10 +40,18 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
 
         const tokenHashes = uniqueTokens.map(t => crypto.createHash('sha256').update(t).digest('hex'));
 
-        // 2. Query all tokens at once
+        // 2. Query all tokens at once with real profile fields using JOINs to avoid N+1 queries
         const result = await pool.query(`
-            SELECT s.*
+            SELECT s.*,
+                   c.full_name AS customer_name, c.email AS customer_email,
+                   sel.full_name AS seller_name, sel.email AS seller_email,
+                   adm.name AS admin_name, adm.email AS admin_email,
+                   sa.name AS super_admin_name, sa.email AS super_admin_email
             FROM auth_sessions s 
+            LEFT JOIN customers c ON s.user_ref_id = c.customer_id AND s.user_type = 'customer'
+            LEFT JOIN sellers sel ON s.user_ref_id = sel.seller_id AND s.user_type = 'seller'
+            LEFT JOIN admins adm ON s.user_ref_id = adm.admin_id AND s.user_type = 'admin'
+            LEFT JOIN super_admins sa ON s.user_ref_id = sa.super_admin_id AND s.user_type = 'super_admin'
             WHERE s.token_hash = ANY($1) 
             AND s.is_blacklisted = false 
             AND s.expires_at > NOW()
@@ -97,14 +105,31 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
             [session.session_id]
         );
 
+        let realEmail = null;
+        let realName = null;
+
+        if (session.user_type === 'customer') {
+            realEmail = session.customer_email;
+            realName = session.customer_name;
+        } else if (session.user_type === 'seller') {
+            realEmail = session.seller_email;
+            realName = session.seller_name;
+        } else if (session.user_type === 'admin') {
+            realEmail = session.admin_email;
+            realName = session.admin_name;
+        } else if (session.user_type === 'super_admin') {
+            realEmail = session.super_admin_email;
+            realName = session.super_admin_name;
+        }
+
         const user = {
             id: session.user_ref_id,
             type: session.user_type,
             get email() {
-                return `user-${session.user_ref_id.slice(0, 8)}@market.internal`;
+                return realEmail || `user-${session.user_ref_id.slice(0, 8)}@market.internal`;
             },
             get name() {
-                return 'Authenticated User';
+                return realName || 'Authenticated User';
             }
         };
 

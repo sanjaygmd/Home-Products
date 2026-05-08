@@ -1,5 +1,6 @@
 import { pool } from '../configs/db.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { sanitizeText } from '../utils/sanitizer.js';
 
 // Get all active coupons
 export const getActiveCoupons = async (req, res) => {
@@ -19,9 +20,18 @@ export const getActiveCoupons = async (req, res) => {
 export const validateCoupon = async (req, res) => {
     const { code, subtotal } = req.body;
     try {
+        if (!code) {
+            return res.status(400).json({ success: false, message: "Coupon code is required" });
+        }
+        const cleanCode = sanitizeText(code.trim().toUpperCase());
+        const couponRegex = /^[A-Z0-9\-]{3,30}$/;
+        if (!couponRegex.test(cleanCode)) {
+            return res.status(400).json({ success: false, message: "Invalid coupon code format" });
+        }
+
         const result = await pool.query(
             "SELECT * FROM coupons WHERE code = $1",
-            [code.toUpperCase()]
+            [cleanCode]
         );
 
         if (result.rows.length === 0) {
@@ -96,11 +106,20 @@ export const createCoupon = async (req, res) => {
     const { code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
 
     try {
+        if (!code) {
+            return res.status(400).json({ success: false, message: "Coupon code is required" });
+        }
+        const cleanCode = sanitizeText(code.trim().toUpperCase());
+        const couponRegex = /^[A-Z0-9\-]{3,30}$/;
+        if (!couponRegex.test(cleanCode)) {
+            return res.status(400).json({ success: false, message: "Coupon code must be 3-30 characters long and contain only uppercase letters, numbers, and hyphens" });
+        }
+
         const result = await pool.query(
             `INSERT INTO coupons (coupon_id, code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)
              VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
              RETURNING *`,
-            [code.toUpperCase(), type || 'percentage', discount_percent || 0, discount_amount || 0, max_discount, min_order_value, valid_until, max_usage, is_active ?? true, admin_id]
+            [cleanCode, type || 'percentage', discount_percent || 0, discount_amount || 0, max_discount, min_order_value, valid_until, max_usage, is_active ?? true, admin_id]
         );
         
         const newCoupon = result.rows[0];
@@ -128,6 +147,18 @@ export const updateCoupon = async (req, res) => {
     const { id } = req.params;
     const { code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id } = req.body;
     try {
+        let cleanCode = null;
+        if (code !== undefined) {
+            if (code === null || code === "") {
+                return res.status(400).json({ success: false, message: "Coupon code cannot be empty" });
+            }
+            cleanCode = sanitizeText(code.trim().toUpperCase());
+            const couponRegex = /^[A-Z0-9\-]{3,30}$/;
+            if (!couponRegex.test(cleanCode)) {
+                return res.status(400).json({ success: false, message: "Coupon code must be 3-30 characters long and contain only uppercase letters, numbers, and hyphens" });
+            }
+        }
+
         // Get old values first
         const oldRes = await pool.query("SELECT * FROM coupons WHERE coupon_id = $1", [id]);
         if (oldRes.rows.length === 0) {
@@ -150,7 +181,7 @@ export const updateCoupon = async (req, res) => {
                  updated_at = NOW()
              WHERE coupon_id = $11
              RETURNING *`,
-            [code?.toUpperCase(), type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, id]
+            [cleanCode, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, id]
         );
         
         const updatedCoupon = result.rows[0];

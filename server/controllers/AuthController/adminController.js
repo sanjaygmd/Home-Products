@@ -178,11 +178,23 @@ export const loginAdmin = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 
+    const startTime = Date.now();
+    const ensureConstantTime = async () => {
+      const elapsed = Date.now() - startTime;
+      const delay = Math.max(0, 450 - elapsed);
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    };
+
     const table = type === 'super_admin' ? 'super_admins' : 'admins';
     const idCol = type === 'super_admin' ? 'super_admin_id' : 'admin_id';
 
     const result = await pool.query(`SELECT * FROM ${table} WHERE email = $1`, [email]);
     if (result.rows.length === 0) {
+      const dummyHash = '$2b$12$DummyHashDummyHashDummyHashDummyHashDummyHashDummy';
+      await bcrypt.compare(password, dummyHash);
+      await ensureConstantTime();
       return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
@@ -190,6 +202,7 @@ export const loginAdmin = async (req, res) => {
     const userId = user[idCol];
 
     if (!user.is_active) {
+      await ensureConstantTime();
       return res.status(403).json({ success: false, message: "Account is deactivated. Contact platform owner." });
     }
 
@@ -204,6 +217,7 @@ export const loginAdmin = async (req, res) => {
     }
 
     if (!isMatch) {
+      await ensureConstantTime();
       return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
@@ -222,6 +236,8 @@ export const loginAdmin = async (req, res) => {
       await saveOtp(user.email, 'super_admin_2fa', otp, expires, { ...user, userId });
 
       await sendSuperAdminLoginOTP(user.email, user.name, otp);
+
+      await ensureConstantTime();
 
       return res.status(200).json({
         success: true,
@@ -248,6 +264,8 @@ export const loginAdmin = async (req, res) => {
     });
 
     setSessionCookie(res, type, session.token);
+
+    await ensureConstantTime();
 
 
 
