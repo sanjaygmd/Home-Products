@@ -2,8 +2,17 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Critical Environment Validations
-const requiredEnvVars = ['JWT_SECRET', 'MASTER_SECURITY_KEY', 'NODE_ENV', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME'];
+process.env.NODE_ENV = process.env.NODE_ENV || 'development';
+const requiredEnvVars = ['JWT_SECRET', 'MASTER_SECURITY_KEY'];
 const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
+
+// Accept either DB_URL OR all discrete database configurations
+const hasDbUrl = !!process.env.DB_URL;
+const hasDiscreteDb = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME'].every(v => !!process.env[v]);
+
+if (!hasDbUrl && !hasDiscreteDb) {
+  missingEnvVars.push('DB_URL (or DB_USER + DB_PASSWORD + DB_HOST + DB_PORT + DB_NAME)');
+}
 
 if (missingEnvVars.length > 0) {
   console.error("========================================================================");
@@ -51,7 +60,7 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-00000000            "img-src": ["'self'", "data:", "https://*.amazonaws.com", "https://via.placeholder.com", "https://images.unsplash.com"],
+            "img-src": ["'self'", "data:", "https://*.amazonaws.com", "https://via.placeholder.com", "https://images.unsplash.com"],
         },
     },
 }));
