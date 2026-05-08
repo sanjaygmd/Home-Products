@@ -32,11 +32,14 @@ export const logAction = async (req, action, payload = {}) => {
             'ADD_COUPON': 'coupons',
             'UPDATE_COUPON': 'coupons',
             'DELETE_COUPON': 'coupons',
-            'LOGIN': 'auth'
+            'LOGIN': 'auth',
+            'APPROVE_PAYOUT': 'seller_payouts',
+            'REJECT_PAYOUT': 'seller_payouts',
+            'INITIATE_PAYOUT': 'seller_payouts'
         };
 
         const table_name = tableMap[action] || 'system';
-        const record_id = payload.product_id || payload.variant_id || payload.coupon_id || null;
+        const record_id = payload.product_id || payload.variant_id || payload.coupon_id || payload.payout_id || null;
         
         // Extract IP and User Agent
         const ip = req.ip || req.socket.remoteAddress || '0.0.0.0';

@@ -335,8 +335,22 @@ export const updateProduct = async (req, res) => {
     const {
         name, description, price, mrp, stock_quantity,
         brand, category_id, room, discount_percent, sku,
-        weight, length, breadth, height, variants // Array of variants to sync
+        weight, length, breadth, height, variants, // Array of variants to sync
+        images
     } = req.body;
+
+    // Validate image URLs to prevent SSRF and Content-Injection
+    if (images && Array.isArray(images)) {
+        for (const img of images) {
+            const url = typeof img === 'string' ? img : img.url;
+            if (!isValidImageUrl(url)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid image URL format or unsafe protocol/host detected."
+                });
+            }
+        }
+    }
 
     const cleanName = name !== undefined ? sanitizeText(name) : undefined;
     const cleanDescription = description !== undefined ? sanitizeDescription(description) : undefined;
@@ -360,6 +374,8 @@ export const updateProduct = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this product' });
         }
 
+        const dbImagesArray = images ? images.map(img => typeof img === 'string' ? img : img.url) : null;
+
         // 1. Update the base product record
         const result = await client.query(
             `UPDATE products 
@@ -377,17 +393,35 @@ export const updateProduct = async (req, res) => {
                  length = COALESCE($12, length), 
                  breadth = COALESCE($13, breadth), 
                  height = COALESCE($14, height),
+                 images = COALESCE($15, images),
                  updated_at = NOW()
-             WHERE product_id = $15 RETURNING *`,
+             WHERE product_id = $16 RETURNING *`,
             [
                 cleanName, cleanDescription, price, mrp, stock_quantity,
                 cleanBrand, category_id, cleanRoom, discount_percent, cleanSku,
                 weight, length, breadth, height,
+                dbImagesArray,
                 product_id
             ]
         );
 
         const product = result.rows[0];
+
+        // Sync Product Images Table
+        if (images && Array.isArray(images)) {
+            await client.query('DELETE FROM product_images WHERE product_id = $1', [product_id]);
+            for (let i = 0; i < images.length; i++) {
+                const img = images[i];
+                const imageUrl = typeof img === 'string' ? img : img.url;
+                const variantId = (typeof img === 'object' && img.variant_id) ? img.variant_id : null;
+
+                await client.query(
+                    `INSERT INTO product_images (image_id, product_id, image_url, is_primary, sort_order, variant_id) 
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+                    [product_id, imageUrl, i === 0, i, variantId]
+                );
+            }
+        }
 
 
         // 2. Sync Variants (Smart Sync)

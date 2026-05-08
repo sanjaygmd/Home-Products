@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { getSellerEarningsSummary, getSellerPayoutHistory, requestPayout } from "../../services/payoutService";
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PendingActionsIcon from '@mui/icons-material/PendingActions';
@@ -6,6 +6,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DownloadIcon from '@mui/icons-material/Download';
 import SendIcon from '@mui/icons-material/Send';
 import { useToast } from "../../hooks/use-toast";
+import { Search } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext.jsx";
 
@@ -26,6 +27,27 @@ const SellerPayments = () => {
   });
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
+  const [payoutSearch, setPayoutSearch] = useState('');
+
+  const filteredTransactions = useMemo(() => {
+    if (!data.transactions) return [];
+    return data.transactions.filter(tx => {
+      const q = payoutSearch.toLowerCase();
+      const txId = String(tx.payout_id || '').toLowerCase();
+      const status = String(tx.status || '').toLowerCase();
+      const method = String(tx.payment_method || 'Automatic').toLowerCase();
+      const notes = String(tx.notes || '').toLowerCase();
+      const dateStr = new Date(tx.created_at).toLocaleDateString().toLowerCase();
+      return (
+        txId.includes(q) ||
+        status.includes(q) ||
+        method.includes(q) ||
+        notes.includes(q) ||
+        dateStr.includes(q) ||
+        (tx.amount && tx.amount.toString().includes(q))
+      );
+    });
+  }, [data.transactions, payoutSearch]);
 
   const fetchData = async () => {
     if (!sellerId) return;
@@ -130,6 +152,10 @@ const SellerPayments = () => {
           <div>
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Lifetime Earnings</p>
               <h2 className="text-4xl font-black text-gray-900 tracking-tight">₹{Number(data.summary.total_earnings).toLocaleString()}</h2>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 font-black uppercase text-[8px] tracking-widest mt-1.5 border border-emerald-100">
+                <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                Platform Fee (10%) Pre-Deducted
+              </div>
           </div>
           <div className="flex gap-4">
               <div className="text-right">
@@ -165,17 +191,29 @@ const SellerPayments = () => {
 
       {/* Transaction History */}
       <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-gray-100">
-        <div className="flex justify-between items-center mb-10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-10">
           <div>
             <h3 className="text-xl font-black text-gray-800 tracking-tight">Payout Report</h3>
             <p className="text-sm text-gray-500 font-semibold mt-1">Track your payout requests and historical transfers</p>
           </div>
-          <button className="flex items-center gap-2 text-xs font-black text-blue-600 bg-blue-50 px-5 py-3 rounded-2xl hover:bg-blue-100 transition">
-            <DownloadIcon fontSize="small" /> Export Report
-          </button>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Search payouts by ID, status..."
+                value={payoutSearch}
+                onChange={(e) => setPayoutSearch(e.target.value)}
+                className="w-full sm:w-64 pl-11 pr-4 h-12 bg-gray-50 border border-gray-200 rounded-2xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-all"
+              />
+            </div>
+            <button className="flex items-center justify-center gap-2 text-xs font-black text-blue-600 bg-blue-50 px-5 py-3 rounded-2xl hover:bg-blue-100 transition whitespace-nowrap shrink-0">
+              <DownloadIcon fontSize="small" /> Export Report
+            </button>
+          </div>
         </div>
 
-        {data.transactions.length > 0 ? (
+        {filteredTransactions.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
@@ -189,7 +227,7 @@ const SellerPayments = () => {
                 </tr>
               </thead>
               <tbody className="text-sm text-gray-600">
-                {data.transactions.map((tx) => (
+                {filteredTransactions.map((tx) => (
                   <tr key={tx.payout_id} className="group hover:bg-gray-50/70 transition-all">
                     <td className="py-6 font-black text-gray-400 group-hover:text-blue-600 transition-colors uppercase">
                       #{tx.payout_id.slice(0, 8)}
@@ -224,8 +262,8 @@ const SellerPayments = () => {
         ) : (
           <div className="text-sm text-gray-500 py-20 text-center bg-gray-50/50 rounded-[2.5rem] border-4 border-dashed border-gray-100">
              <AccountBalanceWalletIcon sx={{ fontSize: 60, color: '#e2e8f0' }} className="mb-4" />
-             <p className="font-bold text-xl text-gray-400 tracking-tight">No payouts requested yet</p>
-             <p className="text-xs text-gray-400 mt-2">Request your first payout by clicking the button above.</p>
+             <p className="font-bold text-xl text-gray-400 tracking-tight">No matching payouts found</p>
+             <p className="text-xs text-gray-400 mt-2">Try adjusting your search criteria.</p>
           </div>
         )}
       </div>

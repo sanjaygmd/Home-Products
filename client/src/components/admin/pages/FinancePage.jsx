@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { 
+import {
   IndianRupee, TrendingUp, CreditCard, Receipt, Search,
-  Download, Calendar, History, TrendingDown, Wallet, ShieldCheck, 
+  Download, Calendar, History, TrendingDown, Wallet, ShieldCheck,
   ArrowUpRight, ArrowDownRight, LayoutDashboard, Landmark, ArrowRight, Eye, CheckCircle2, XCircle
 } from "lucide-react";
 import { Button } from "../../ui/button";
@@ -236,7 +236,7 @@ export default function FinancePage() {
 
           doc.text(log.date || "N/A", 14, yOffsetLog);
           doc.text(log.seller || "System / Platform", 45, yOffsetLog);
-          
+
           doc.setFont("helvetica", "bold");
           doc.text(log.type === 'payout' ? "PARTNER PAYOUT" : "CREDIT CHARGE", 115, yOffsetLog);
           doc.setFont("helvetica", "normal");
@@ -279,6 +279,19 @@ export default function FinancePage() {
   useEffect(() => {
     fetchFinanceData();
   }, [range]);
+
+  useEffect(() => {
+    if (selectedPayout && selectedPayout.status === 'Requested') {
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+      setPayoutForm({
+        transaction_ref: `TXN-PAYOUT-${dateStr}-${rand}`,
+        notes: `Processed on ${new Date().toLocaleDateString()}`
+      });
+    } else if (!selectedPayout) {
+      setPayoutForm({ transaction_ref: '', notes: '' });
+    }
+  }, [selectedPayout]);
 
   const fetchFinanceData = async () => {
     setLoading(true);
@@ -325,6 +338,22 @@ export default function FinancePage() {
   };
 
   const { summary, monthlyPL, payouts, expenses, transactions } = financeData;
+  const [payoutSearch, setPayoutSearch] = useState('');
+
+  const filteredPayouts = useMemo(() => {
+    if (!payouts) return [];
+    return payouts.filter(payout => {
+      const q = payoutSearch.toLowerCase();
+      return (
+        (payout.id && payout.id.toLowerCase().includes(q)) ||
+        (payout.name && payout.name.toLowerCase().includes(q)) ||
+        (payout.status && payout.status.toLowerCase().includes(q)) ||
+        (payout.amount && payout.amount.toString().includes(q)) ||
+        (payout.revenue && payout.revenue.toString().includes(q)) ||
+        (payout.date && new Date(payout.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase().includes(q))
+      );
+    });
+  }, [payouts, payoutSearch]);
 
   const handleExport = () => {
     toast({ title: "Audit Report", description: "Your financial ledger is being generated for download." });
@@ -344,7 +373,7 @@ export default function FinancePage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-100 p-1.5 rounded-2xl mr-4">
-            <button 
+            <button
               onClick={() => setRange('monthly')}
               className={cn(
                 "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
@@ -353,7 +382,7 @@ export default function FinancePage() {
             >
               Monthly
             </button>
-            <button 
+            <button
               onClick={() => setRange('annual')}
               className={cn(
                 "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
@@ -363,7 +392,7 @@ export default function FinancePage() {
               Yearly
             </button>
           </div>
-          <Button 
+          <Button
             onClick={handleDownloadReport}
             className="h-14 rounded-2xl px-8 bg-slate-950 text-white font-black uppercase text-[10px] tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
           >
@@ -374,33 +403,33 @@ export default function FinancePage() {
 
       {/* Stats Grid */}
       <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-        <FinanceStatCard 
-          title={range === 'monthly' ? "Monthly Revenue" : "Annual Revenue"} 
-          value={fmt(summary.gross_revenue)} 
-          label="Total Gross Sales" 
-          icon={IndianRupee} 
-          color="bg-violet-600" 
+        <FinanceStatCard
+          title={range === 'monthly' ? "Monthly Revenue" : "Annual Revenue"}
+          value={fmt(summary.gross_revenue)}
+          label="Total Gross Sales"
+          icon={IndianRupee}
+          color="bg-violet-600"
         />
-        <FinanceStatCard 
-          title="Platform Earnings" 
-          value={fmt(summary.platform_commission)} 
-          label="Commission (10%)" 
-          icon={Receipt} 
-          color="bg-emerald-600" 
+        <FinanceStatCard
+          title="Platform Earnings"
+          value={fmt(summary.platform_commission)}
+          label="Commission (10%)"
+          icon={Receipt}
+          color="bg-emerald-600"
         />
-        <FinanceStatCard 
-          title="Net Profit" 
-          value={fmt(summary.net_profit)} 
-          label="Platform Revenue" 
-          icon={TrendingUp} 
-          color="bg-blue-600" 
+        <FinanceStatCard
+          title="Net Profit"
+          value={fmt(summary.net_profit)}
+          label="Platform Revenue"
+          icon={TrendingUp}
+          color="bg-blue-600"
         />
-        <FinanceStatCard 
-          title="Transaction Count" 
-          value={transactions.length} 
-          label="Total entries" 
-          icon={History} 
-          color="bg-amber-600" 
+        <FinanceStatCard
+          title="Transaction Count"
+          value={transactions.length}
+          label="Total entries"
+          icon={History}
+          color="bg-amber-600"
         />
       </div>
 
@@ -443,10 +472,10 @@ export default function FinancePage() {
                     </td>
                     <td className="pl-6 pr-10 py-8 text-right">
                       <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-100">
-                         <span className={cn("font-black text-sm", item.profit >= 0 ? "text-slate-900" : "text-rose-600")}>
-                           {fmt(item.profit)}
-                         </span>
-                         {item.profit >= 0 ? <TrendingUp size={14} className="text-emerald-500" /> : <TrendingDown size={14} className="text-rose-500" />}
+                        <span className={cn("font-black text-sm", item.profit >= 0 ? "text-slate-900" : "text-rose-600")}>
+                          {fmt(item.profit)}
+                        </span>
+                        {item.profit >= 0 ? <TrendingUp size={14} className="text-emerald-500" /> : <TrendingDown size={14} className="text-rose-500" />}
                       </div>
                     </td>
                   </tr>
@@ -455,6 +484,100 @@ export default function FinancePage() {
                 <tr>
                   <td colSpan={4} className="py-24 text-center">
                     <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">No data available for this range</p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Seller Payout Requests Ledger */}
+      <div className="bg-white rounded-[40px] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-10 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Seller Payout Requests</h3>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+              Approve or reject seller withdrawal requests
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 md:w-80">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Search payouts by store, status, amount..."
+                value={payoutSearch}
+                onChange={(e) => setPayoutSearch(e.target.value)}
+                className="w-full pl-11 pr-4 h-12 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-600/20 focus:border-violet-600 transition-all"
+              />
+            </div>
+            <div className="h-12 w-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-600 shadow-sm shrink-0">
+              <CreditCard size={22} />
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50">
+                <th className="pl-10 pr-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Request ID</th>
+                <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Seller Store</th>
+                <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Date Requested</th>
+                <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Requested Amount</th>
+                <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Partner Revenue</th>
+                <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Status</th>
+                <th className="pl-6 pr-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filteredPayouts && filteredPayouts.length > 0 ? (
+                filteredPayouts.map((payout) => (
+                  <tr key={payout.id} className="hover:bg-slate-50/30 transition-colors group">
+                    <td className="pl-10 pr-6 py-6">
+                      <span className="font-mono text-xs font-bold text-slate-400 uppercase tracking-tight">#{String(payout.id).slice(0, 8).toUpperCase()}</span>
+                    </td>
+                    <td className="px-6 py-6">
+                      <span className="font-black text-[15px] text-slate-900 tracking-tight">{payout.name}</span>
+                    </td>
+                    <td className="px-6 py-6 text-slate-500 font-bold text-xs">
+                      {new Date(payout.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-6 py-6 text-right font-black text-sm text-slate-900">
+                      {fmt(payout.amount)}
+                    </td>
+                    <td className="px-6 py-6 text-right font-black text-sm text-emerald-600">
+                      {fmt(payout.revenue)}
+                    </td>
+                    <td className="px-6 py-6 text-center">
+                      <span className={cn(
+                        "inline-block px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest",
+                        payout.status === 'Paid' && "bg-emerald-100 text-emerald-700",
+                        payout.status === 'Requested' && "bg-amber-100 text-amber-700",
+                        payout.status === 'Rejected' && "bg-rose-100 text-rose-700"
+                      )}>
+                        {payout.status}
+                      </span>
+                    </td>
+                    <td className="pl-6 pr-10 py-6 text-center">
+                      <Button
+                        onClick={() => setSelectedPayout(payout)}
+                        className={cn(
+                          "h-10 rounded-xl px-5 text-[10px] font-black uppercase tracking-widest shadow-sm",
+                          payout.status === 'Requested' 
+                            ? "bg-violet-600 hover:bg-violet-700 text-white shadow-violet-100" 
+                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 shadow-none"
+                        )}
+                      >
+                        {payout.status === 'Requested' ? "Review Request" : "View Details"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="py-24 text-center">
+                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">No matching payout requests found</p>
                   </td>
                 </tr>
               )}
@@ -493,87 +616,105 @@ export default function FinancePage() {
       {selectedPayout && (
         <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center z-[100] p-4 backdrop-blur-xl">
           <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl relative border border-slate-200">
-             <button onClick={() => setSelectedPayout(null)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors">
-               <ArrowRight className="h-6 w-6 rotate-180" />
-             </button>
-             
-             <div className="flex items-center gap-3 mb-6">
-                <div className="h-2 w-10 bg-amber-500 rounded-full" />
-                <span className="text-[11px] font-black text-amber-500 uppercase tracking-[0.3em]">Payout Review</span>
-             </div>
+            <button onClick={() => setSelectedPayout(null)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors">
+              <ArrowRight className="h-6 w-6 rotate-180" />
+            </button>
 
-             <div className="mb-8">
-                <h2 className="text-3xl font-black text-slate-900 tracking-tight">{selectedPayout.name}</h2>
-                <p className="text-slate-500 font-bold mt-1">Request ID: <span className="font-mono text-xs">{selectedPayout.id}</span></p>
-             </div>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="h-2 w-10 bg-amber-500 rounded-full" />
+              <span className="text-[11px] font-black text-amber-500 uppercase tracking-[0.3em]">Payout Review</span>
+            </div>
 
-             <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Requested Amount</p>
-                   <p className="text-2xl font-black text-slate-900 tracking-tight">{fmt(selectedPayout.amount)}</p>
-                </div>
-                <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Partner Revenue</p>
-                   <p className="text-2xl font-black text-slate-900 tracking-tight">{fmt(selectedPayout.revenue)}</p>
-                </div>
-             </div>
+            <div className="mb-8">
+              <h2 className="text-3xl font-black text-slate-900 tracking-tight">{selectedPayout.name}</h2>
+              <p className="text-slate-500 font-bold mt-1">Request ID: <span className="font-mono text-xs">{selectedPayout.id}</span></p>
+            </div>
 
-             {selectedPayout.status === 'Requested' ? (
-               <div className="space-y-6">
-                 <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Transaction Reference (Required for Approval)</label>
-                    <input 
-                      type="text" 
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              <div className="p-4 bg-slate-50 rounded-[24px] border border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Gross Sales</p>
+                <p className="text-lg font-black text-slate-900 tracking-tight">{fmt(selectedPayout.revenue)}</p>
+              </div>
+              <div className="p-4 bg-violet-50/50 rounded-[24px] border border-violet-100/50">
+                <p className="text-[9px] font-black text-violet-600 uppercase tracking-widest mb-1">Platform Cut (10%)</p>
+                <p className="text-lg font-black text-violet-600 tracking-tight">{fmt(selectedPayout.revenue - selectedPayout.amount)}</p>
+              </div>
+              <div className="p-4 bg-emerald-50/50 rounded-[24px] border border-emerald-100/50">
+                <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Net Payout (90%)</p>
+                <p className="text-lg font-black text-emerald-700 tracking-tight">{fmt(selectedPayout.amount)}</p>
+              </div>
+            </div>
+
+            {selectedPayout.status === 'Requested' ? (
+              <div className="space-y-6">
+                <div>
+                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Transaction Reference (Required for Approval)</label>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
                       placeholder="e.g. UTR-992122112"
                       value={payoutForm.transaction_ref}
-                      onChange={(e) => setPayoutForm({...payoutForm, transaction_ref: e.target.value})}
-                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-4 focus:ring-violet-500/10 transition-all placeholder:text-slate-300"
+                      onChange={(e) => setPayoutForm({ ...payoutForm, transaction_ref: e.target.value })}
+                      className="flex-1 h-14 px-6 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-4 focus:ring-violet-500/10 transition-all placeholder:text-slate-300"
                     />
-                 </div>
-                 <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Admin Notes</label>
-                    <textarea 
-                      placeholder="Optional notes for the seller..."
-                      value={payoutForm.notes}
-                      onChange={(e) => setPayoutForm({...payoutForm, notes: e.target.value})}
-                      className="w-full h-24 p-6 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-4 focus:ring-violet-500/10 transition-all placeholder:text-slate-300 resize-none"
-                    />
-                 </div>
-
-                 <div className="flex gap-4">
-                    <Button 
-                      onClick={() => handlePayoutAction('Paid')}
-                      disabled={actionLoading}
-                      className="flex-1 h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[11px] tracking-widest shadow-lg shadow-emerald-200"
-                    >
-                      {actionLoading ? "Processing..." : "Approve & Mark as Paid"}
-                    </Button>
-                    <Button 
+                    <Button
+                      type="button"
                       variant="outline"
-                      onClick={() => handlePayoutAction('Rejected')}
-                      disabled={actionLoading}
-                      className="flex-1 h-16 rounded-2xl border-slate-200 text-rose-600 font-black uppercase text-[11px] tracking-widest hover:bg-rose-50"
+                      onClick={() => {
+                        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+                        const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+                        setPayoutForm(prev => ({ ...prev, transaction_ref: `TXN-PAYOUT-${dateStr}-${rand}` }));
+                      }}
+                      className="h-14 px-6 rounded-2xl border-slate-200 text-[10px] font-black uppercase tracking-wider hover:bg-slate-50"
                     >
-                      Reject Request
+                      Regenerate
                     </Button>
-                 </div>
-               </div>
-             ) : (
-               <div className="p-8 bg-slate-50 rounded-3xl border border-slate-100">
-                  <div className="flex items-center justify-between mb-4">
-                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payout Status</span>
-                     <span className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest", selectedPayout.status === 'Paid' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
-                        {selectedPayout.status}
-                     </span>
                   </div>
-                  {selectedPayout.status === 'Paid' && (
-                    <div className="flex items-center justify-between">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transaction Ref</span>
-                       <span className="text-sm font-black text-slate-900 font-mono">#{selectedPayout.transaction_ref || 'N/A'}</span>
-                    </div>
-                  )}
-               </div>
-             )}
+                </div>
+                <div>
+                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Admin Notes</label>
+                  <textarea
+                    placeholder="Optional notes for the seller..."
+                    value={payoutForm.notes}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, notes: e.target.value })}
+                    className="w-full h-24 p-6 rounded-2xl bg-slate-50 border-none text-sm font-bold focus:ring-4 focus:ring-violet-500/10 transition-all placeholder:text-slate-300 resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-4">
+                  <Button
+                    onClick={() => handlePayoutAction('Paid')}
+                    disabled={actionLoading}
+                    className="flex-1 h-16 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[11px] tracking-widest shadow-lg shadow-emerald-200"
+                  >
+                    {actionLoading ? "Processing..." : "Approve & Mark as Paid"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handlePayoutAction('Rejected')}
+                    disabled={actionLoading}
+                    className="flex-1 h-16 rounded-2xl border-slate-200 text-rose-600 font-black uppercase text-[11px] tracking-widest hover:bg-rose-50"
+                  >
+                    Reject Request
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 bg-slate-50 rounded-3xl border border-slate-100">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payout Status</span>
+                  <span className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest", selectedPayout.status === 'Paid' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                    {selectedPayout.status}
+                  </span>
+                </div>
+                {selectedPayout.status === 'Paid' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transaction Ref</span>
+                    <span className="text-sm font-black text-slate-900 font-mono">#{selectedPayout.transaction_ref || 'N/A'}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

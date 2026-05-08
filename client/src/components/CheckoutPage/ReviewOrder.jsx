@@ -20,7 +20,9 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
 
   const subtotalValue = items.reduce((acc, item) => acc + (item.discountPrice || item.price) * (item.quantity || 1), 0);
   const discountValue = appliedCoupon
-    ? Math.min((subtotalValue * appliedCoupon.discount_percent) / 100, appliedCoupon.max_discount || Infinity)
+    ? (appliedCoupon.type === 'flat' || appliedCoupon.type === 'fixed' || parseFloat(appliedCoupon.discount_amount || 0) > 0)
+      ? parseFloat(appliedCoupon.discount_amount)
+      : Math.min((subtotalValue * (appliedCoupon.discount_percent || 0)) / 100, appliedCoupon.max_discount || Infinity)
     : 0;
 
   const sendOrderEmail = (orderId) => {

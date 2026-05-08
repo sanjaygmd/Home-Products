@@ -1,4 +1,5 @@
 import { pool } from '../configs/db.js';
+import { logAction } from '../utils/auditLogger.js';
 
 // Get earnings summary for a seller
 export const getSellerEarningsSummary = async (req, res) => {
@@ -140,10 +141,24 @@ export const requestPayout = async (req, res) => {
                 payout_id = $1::uuid
             WHERE seller_id = $2::uuid 
             AND LOWER(status) = 'pending' 
-            AND created_at >= $3 
-            AND created_at <= $4
             AND order_id IN (SELECT order_id FROM orders WHERE order_status = 'Delivered')
-        `, [payoutId, seller_id, startDate, endDate]);
+        `, [payoutId, seller_id]);
+
+        // 4. Fetch Store Name for Admin notification
+        const sellerRes = await client.query("SELECT store_name FROM sellers WHERE seller_id = $1", [seller_id]);
+        const storeName = sellerRes.rows[0]?.store_name || "A Seller";
+
+        // 5. Insert Notification for Seller
+        await client.query(`
+            INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
+            VALUES (gen_random_uuid(), $1, NULL, NULL, NULL, 'payout_request', $2, false, NOW())
+        `, [seller_id, `Your payout request of ₹${Number(amount).toLocaleString('en-IN')} has been successfully submitted to the admin for approval.`]);
+
+        // 6. Insert Notification for Admin (admin_id is NULL so all admins see it)
+        await client.query(`
+            INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
+            VALUES (gen_random_uuid(), NULL, NULL, NULL, NULL, 'payout_request', $1, false, NOW())
+        `, [`New payout requested by "${storeName}" for ₹${Number(amount).toLocaleString('en-IN')}.`]);
 
         await client.query('COMMIT');
         res.status(200).json({ success: true, message: "Payout request submitted successfully", payout_id: payoutId });
@@ -208,39 +223,58 @@ export const updatePayoutStatus = async (req, res) => {
             WHERE payout_id = $5::uuid
         `, [status, finalAdminId, transaction_ref, notes, payout_id]);
 
-        // 3. Update commissions based on status - USING payout_id LINK
-        if (status === 'Paid') {
-            // Mark commissions as Paid
-            const commissionUpdate = await client.query(`
-                UPDATE seller_commissions 
-                SET status = 'paid' 
-                WHERE payout_id = $1::uuid
-            `, [payout_id]);
+         // 3. Update commissions based on status - USING payout_id LINK
+         if (status === 'Paid') {
+             // Mark commissions as Paid
+             const commissionUpdate = await client.query(`
+                 UPDATE seller_commissions 
+                 SET status = 'paid' 
+                 WHERE payout_id = $1::uuid
+             `, [payout_id]);
+ 
+             // Log the finance transaction
+             await client.query(`
+                 INSERT INTO finance_transactions (
+                     finance_transactions_id, order_id, payment_id, seller_payout_id, 
+                     transaction_type, amount, created_at, daily_finance_id
+                 ) VALUES (
+                     gen_random_uuid(), NULL, NULL, $1::uuid, 'payout', $2, NOW(), NULL
+                 )
+             `, [payout_id, payout.amount]);
 
+             // Insert Notification for Seller
+             await client.query(`
+                 INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
+                 VALUES (gen_random_uuid(), $1, NULL, NULL, NULL, 'payout_approved', $2, false, NOW())
+             `, [payout.seller_id, `Your payout request of ₹${Number(payout.amount).toLocaleString('en-IN')} has been approved and paid! Transaction Ref: ${transaction_ref}.`]);
+ 
+         } else if (status === 'Rejected') {
+             // Revert commissions to 'pending'
+             await client.query(`
+                 UPDATE seller_commissions 
+                 SET status = 'pending',
+                     payout_id = NULL 
+                 WHERE payout_id = $1::uuid
+             `, [payout_id]);
 
+             // Insert Notification for Seller
+             await client.query(`
+                 INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
+                 VALUES (gen_random_uuid(), $1, NULL, NULL, NULL, 'payout_rejected', $2, false, NOW())
+             `, [payout.seller_id, `Your payout request of ₹${Number(payout.amount).toLocaleString('en-IN')} has been rejected. Reason: ${notes || "No reason specified"}.`]);
+         }
+ 
+         // Log Admin Audit Action
+         await logAction(req, status === 'Paid' ? 'APPROVE_PAYOUT' : 'REJECT_PAYOUT', {
+             payout_id: payout_id,
+             seller_id: payout.seller_id,
+             amount: payout.amount,
+             transaction_ref: transaction_ref,
+             notes: notes
+         });
 
-            // Log the finance transaction
-            await client.query(`
-                INSERT INTO finance_transactions (
-                    finance_transactions_id, order_id, payment_id, seller_payout_id, 
-                    transaction_type, amount, created_at, daily_finance_id
-                ) VALUES (
-                    gen_random_uuid(), NULL, NULL, $1::uuid, 'payout', $2, NOW(), NULL
-                )
-            `, [payout_id, payout.amount]);
-
-        } else if (status === 'Rejected') {
-            // Revert commissions to 'pending'
-            await client.query(`
-                UPDATE seller_commissions 
-                SET status = 'pending',
-                    payout_id = NULL 
-                WHERE payout_id = $1::uuid
-            `, [payout_id]);
-        }
-
-        await client.query('COMMIT');
-        res.status(200).json({ success: true, message: `Payout request ${status.toLowerCase()} successfully` });
+         await client.query('COMMIT');
+         res.status(200).json({ success: true, message: `Payout request ${status.toLowerCase()} successfully` });
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("UPDATE PAYOUT STATUS ERROR:", error);

@@ -34,10 +34,12 @@ const OrderSummary = ({
   };
 
   const discountAmount = appliedCoupon 
-    ? Math.min(
-        (subtotal * (appliedCoupon.discount_percent || 0)) / 100, 
-        appliedCoupon.max_discount || Infinity
-      ) 
+    ? (appliedCoupon.type === 'flat' || appliedCoupon.type === 'fixed' || parseFloat(appliedCoupon.discount_amount || 0) > 0)
+      ? parseFloat(appliedCoupon.discount_amount)
+      : Math.min(
+          (subtotal * (appliedCoupon.discount_percent || 0)) / 100, 
+          appliedCoupon.max_discount || Infinity
+        ) 
     : 0;
 
   const finalTotal = subtotal + delivery + gst + codFee + platformFee - discountAmount;

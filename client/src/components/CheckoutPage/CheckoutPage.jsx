@@ -43,10 +43,12 @@ const subtotal = items.reduce((acc, item) => {
   const platformFee = 10;
   
   const discountAmount = appliedCoupon 
-    ? Math.min(
-        (subtotal * appliedCoupon.discount_percent) / 100, 
-        appliedCoupon.max_discount || Infinity
-      ) 
+    ? (appliedCoupon.type === 'flat' || appliedCoupon.type === 'fixed' || parseFloat(appliedCoupon.discount_amount || 0) > 0)
+      ? parseFloat(appliedCoupon.discount_amount)
+      : Math.min(
+          (subtotal * (appliedCoupon.discount_percent || 0)) / 100, 
+          appliedCoupon.max_discount || Infinity
+        ) 
     : 0;
 
   const total = subtotal + delivery + gst + codFee + platformFee - discountAmount;

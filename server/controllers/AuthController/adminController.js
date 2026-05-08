@@ -1124,6 +1124,15 @@ export const getAnalyticsData = async (req, res) => {
  */
 export const getAllPayments = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    const countQuery = `SELECT COUNT(*) FROM orders WHERE is_deleted = false`;
+    const countResult = await pool.query(countQuery);
+    const totalItems = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalItems / limit);
+
     const paymentsQuery = `
       SELECT 
         o.order_id as id,
@@ -1138,8 +1147,9 @@ export const getAllPayments = async (req, res) => {
       JOIN customers c ON o.customer_id = c.customer_id
       WHERE o.is_deleted = false
       ORDER BY o.placed_at DESC
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(paymentsQuery);
+    const result = await pool.query(paymentsQuery, [limit, offset]);
 
     const statsQuery = `
       SELECT 
@@ -1196,6 +1206,12 @@ export const getAllPayments = async (req, res) => {
         success: statsResult.rows[0].success,
         cancelled: statsResult.rows[0].cancelled,
         pending: statsResult.rows[0].pending
+      },
+      pagination: {
+        total_items: totalItems,
+        total_pages: totalPages,
+        current_page: page,
+        limit
       }
     });
   } catch (error) {
@@ -1424,6 +1440,15 @@ export const resolveReturnRequest = async (req, res) => {
  */
 export const getAllOrders = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    const countQuery = `SELECT COUNT(*) FROM orders WHERE is_deleted = false`;
+    const countResult = await pool.query(countQuery);
+    const totalItems = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalItems / limit);
+
     const ordersQuery = `
       SELECT 
         o.order_id as id,
@@ -1455,10 +1480,20 @@ export const getAllOrders = async (req, res) => {
       LEFT JOIN addresses a ON o.address_id = a.address_id
       WHERE o.is_deleted = false
       ORDER BY o.placed_at DESC
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(ordersQuery);
+    const result = await pool.query(ordersQuery, [limit, offset]);
 
-    return res.status(200).json({ success: true, data: result.rows || [] });
+    return res.status(200).json({ 
+      success: true, 
+      data: result.rows || [],
+      pagination: {
+        total_items: totalItems,
+        total_pages: totalPages,
+        current_page: page,
+        limit
+      }
+    });
   } catch (error) {
     console.error("GET ALL ORDERS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch orders" });
@@ -1470,6 +1505,15 @@ export const getAllOrders = async (req, res) => {
  */
 export const getAllCustomers = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    const countQuery = `SELECT COUNT(*) FROM customers WHERE deleted_at IS NULL`;
+    const countResult = await pool.query(countQuery);
+    const totalItems = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalItems / limit);
+
     const customersQuery = `
       SELECT 
         customer_id,
@@ -1482,9 +1526,19 @@ export const getAllCustomers = async (req, res) => {
       FROM customers
       WHERE deleted_at IS NULL
       ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
     `;
-    const result = await pool.query(customersQuery);
-    return res.status(200).json({ success: true, data: result.rows });
+    const result = await pool.query(customersQuery, [limit, offset]);
+    return res.status(200).json({ 
+      success: true, 
+      data: result.rows,
+      pagination: {
+        total_items: totalItems,
+        total_pages: totalPages,
+        current_page: page,
+        limit
+      }
+    });
   } catch (error) {
     console.error("GET ALL CUSTOMERS ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch customers" });

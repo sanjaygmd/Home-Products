@@ -19,28 +19,34 @@ export const getActiveCoupons = async (req, res) => {
 // Validate and get coupon by code
 export const validateCoupon = async (req, res) => {
     const { code, subtotal } = req.body;
+    const client = await pool.connect();
     try {
+        await client.query('BEGIN');
         if (!code) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: "Coupon code is required" });
         }
         const cleanCode = sanitizeText(code.trim().toUpperCase());
         const couponRegex = /^[A-Z0-9\-]{3,30}$/;
         if (!couponRegex.test(cleanCode)) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: "Invalid coupon code format" });
         }
 
-        const result = await pool.query(
-            "SELECT * FROM coupons WHERE code = $1",
+        const result = await client.query(
+            "SELECT * FROM coupons WHERE code = $1 FOR UPDATE",
             [cleanCode]
         );
 
         if (result.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ success: false, message: "Invalid coupon code" });
         }
 
         const coupon = result.rows[0];
 
         if (!coupon.is_active) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: "This coupon is currently inactive" });
         }
 
@@ -53,38 +59,46 @@ export const validateCoupon = async (req, res) => {
             }
             
             if (expiryDate < new Date()) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: "Coupon has expired" });
             }
         }
 
         // Check usage limit (Total)
         if (coupon.max_usage && coupon.used_count >= coupon.max_usage) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: "Coupon usage limit reached" });
         }
 
         // Check if customer already used this coupon (Individual)
         if (req.user && req.user.id) {
-            const usageCheck = await pool.query(
+            const usageCheck = await client.query(
                 "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
                 [coupon.coupon_id, req.user.id]
             );
             if (usageCheck.rows.length > 0) {
+                await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: "You have already used this coupon" });
             }
         }
 
         // Check minimum order value
         if (subtotal && subtotal < parseFloat(coupon.min_order_value)) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ 
                 success: false, 
                 message: `Minimum order value of ₹${coupon.min_order_value} required for this coupon` 
             });
         }
 
+        await client.query('COMMIT');
         res.status(200).json({ success: true, data: coupon });
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('VALIDATE COUPON ERROR:', error);
         res.status(500).json({ success: false, message: "Error validating coupon" });
+    } finally {
+        client.release();
     }
 };
 
