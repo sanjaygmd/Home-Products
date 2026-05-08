@@ -97,42 +97,15 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
             [session.session_id]
         );
 
-        // Fetch user name and email cleanly after token validation
-        let name = null;
-        let email = null;
-        const refId = session.user_ref_id;
-
-        if (session.user_type === 'customer') {
-            const userRes = await pool.query("SELECT full_name, email FROM customers WHERE customer_id = $1", [refId]);
-            if (userRes.rows.length > 0) {
-                name = userRes.rows[0].full_name;
-                email = userRes.rows[0].email;
-            }
-        } else if (session.user_type === 'seller') {
-            const userRes = await pool.query("SELECT full_name, email FROM sellers WHERE seller_id = $1", [refId]);
-            if (userRes.rows.length > 0) {
-                name = userRes.rows[0].full_name;
-                email = userRes.rows[0].email;
-            }
-        } else if (session.user_type === 'admin') {
-            const userRes = await pool.query("SELECT name, email FROM admins WHERE admin_id = $1", [refId]);
-            if (userRes.rows.length > 0) {
-                name = userRes.rows[0].name;
-                email = userRes.rows[0].email;
-            }
-        } else if (session.user_type === 'super_admin') {
-            const userRes = await pool.query("SELECT name, email FROM super_admins WHERE super_admin_id = $1", [refId]);
-            if (userRes.rows.length > 0) {
-                name = userRes.rows[0].name;
-                email = userRes.rows[0].email;
-            }
-        }
-
         const user = {
             id: session.user_ref_id,
             type: session.user_type,
-            email: email,
-            name: name
+            get email() {
+                return `user-${session.user_ref_id.slice(0, 8)}@market.internal`;
+            },
+            get name() {
+                return 'Authenticated User';
+            }
         };
 
 

@@ -2,12 +2,20 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Critical Environment Validations
-if (!process.env.JWT_SECRET) {
-  console.error("FATAL CONFIGURATION ERROR: JWT_SECRET environment variable is missing!");
-  process.exit(1);
-}
-if (!process.env.MASTER_SECURITY_KEY) {
-  console.error("FATAL CONFIGURATION ERROR: MASTER_SECURITY_KEY environment variable is missing!");
+const requiredEnvVars = ['JWT_SECRET', 'MASTER_SECURITY_KEY', 'NODE_ENV', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME'];
+const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
+
+if (missingEnvVars.length > 0) {
+  console.error("========================================================================");
+  console.error("  FATAL CONFIGURATION ERROR: Required environment variables are missing!");
+  console.error("========================================================================");
+  missingEnvVars.forEach(v => console.error(`  [MISSING]: ${v}`));
+  console.error("");
+  console.error("  Helpful Guide:");
+  console.error("  1. Copy '.env.example' template to '.env' in your server folder.");
+  console.error("  2. Populate the placeholder values with your real configuration details.");
+  console.error("  3. Restart the server node process.");
+  console.error("========================================================================");
   process.exit(1);
 }
 
@@ -43,7 +51,7 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-            "img-src": ["'self'", "data:", "https://*.amazonaws.com", "https://via.placeholder.com", "https://images.unsplash.com"],
+00000000            "img-src": ["'self'", "data:", "https://*.amazonaws.com", "https://via.placeholder.com", "https://images.unsplash.com"],
         },
     },
 }));
@@ -72,20 +80,41 @@ app.use(cors({
     credentials: true
 }));
 
-// Request Logger (Development only)
-if (process.env.NODE_ENV !== 'production') {
+// Request Logger (Development only - Async with log rotation at 5MB)
+if (process.env.NODE_ENV === 'development') {
     app.use((req, res, next) => {
         const start = Date.now();
         res.on('finish', () => {
             const duration = Date.now() - start;
             const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)\n`;
-            try {
-                fs.appendFileSync(path.join(process.cwd(), 'debug_requests.log'), entry);
-            } catch (e) {}
+            const logPath = path.join(process.cwd(), 'debug_requests.log');
+            
+            // Perform async append to never block event loop
+            fs.appendFile(logPath, entry, (err) => {
+                if (err) return;
+                
+                // Stat check asynchronously for log rotation
+                fs.stat(logPath, (err, stats) => {
+                    if (!err && stats.size > 5 * 1024 * 1024) {
+                        const backupPath = path.join(process.cwd(), 'debug_requests.log.old');
+                        fs.rename(logPath, backupPath, () => {});
+                    }
+                });
+            });
         });
         next();
     });
 }
+
+// Global API Rate Limiter
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 500, // Limit each IP to 500 requests per windowMs
+    message: { success: false, message: "Too many requests from this IP, please try again after 15 minutes." }
+});
+
+// Apply global rate limiting before routing
+app.use(apiLimiter);
 
 // Rate Limiters
 const authLimiter = rateLimit({
@@ -129,6 +158,7 @@ app.use('/pickup', pickupRoutes);
 app.use('/product', productRoutes);
 app.use('/cart', cartRoutes);
 app.use('/wishlist', wishlistRoutes);
+app.use('/orders', orderRoutes);
 app.use('/order', orderRoutes);
 app.use('/shipping', shiprocketRoutes);
 

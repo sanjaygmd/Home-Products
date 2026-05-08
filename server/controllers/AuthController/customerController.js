@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { generateOtp, hashOtp } from "../../utils/otp.js";
 import { sendEmailOtp } from "../../utils/email.js";
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
+import { sanitizeText } from "../../utils/sanitizer.js";
 
 export const loginCustomer = async (req, res) => {
   try {
@@ -25,20 +26,34 @@ export const loginCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
+    const startTime = Date.now();
+    const ensureConstantTime = async () => {
+      const elapsed = Date.now() - startTime;
+      const delay = Math.max(0, 450 - elapsed);
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    };
+
     const existingUser = await pool.query(
       "SELECT customer_id, full_name, email, phone, is_active, block_reason, password_hash, profile_picture_url FROM customers WHERE email = $1", 
       [email]
     )
     if (existingUser.rows.length === 0) {
-      return res.status(404).json({
+      // Burn CPU cycles matching a normal password hashing check to prevent timing side-channels
+      const dummyHash = '$2b$12$DummyHashDummyHashDummyHashDummyHashDummyHashDummy';
+      await bcrypt.compare(password, dummyHash);
+      await ensureConstantTime();
+      return res.status(401).json({
         success: false,
-        message: 'User not found, try to register'
-      })
+        message: 'Invalid email or password'
+      });
     }
 
     const user = existingUser.rows[0];
 
     if (!user.is_active) {
+      await ensureConstantTime();
       return res.status(403).json({
         success: false,
         message: user.block_reason || 'Your account has been restricted. Please contact support.',
@@ -57,9 +72,10 @@ export const loginCustomer = async (req, res) => {
     }
 
     if (!isMatch) {
+      await ensureConstantTime();
       return res.status(401).json({
         success: false,
-        message: 'Invalid password'
+        message: 'Invalid email or password'
       });
     }
 
@@ -113,7 +129,8 @@ export const registerCustomer = async (req, res) => {
       });
     }
 
-    if (full_name.trim().length < 3) {
+    const cleanFullName = sanitizeText(full_name);
+    if (cleanFullName.length < 3) {
       return res.status(400).json({ success: false, message: "Full name must be at least 3 characters" });
     }
 
@@ -153,7 +170,7 @@ export const registerCustomer = async (req, res) => {
       VALUES 
       (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)
       RETURNING customer_id, full_name, email, phone, profile_picture_url`,
-      [full_name, email, phone, passwordHash, date_of_birth || null, gender || null, profile_picture_url || null]
+      [cleanFullName, email, phone, passwordHash, date_of_birth || null, gender || null, profile_picture_url || null]
     );
 
     // Create Auth Session automatically on register
@@ -226,6 +243,13 @@ export const customerOnboarding = async (req, res) => {
       });
     }
 
+    const cleanFullName = sanitizeText(full_name);
+    const cleanAddressLine1 = sanitizeText(address_line_1);
+    const cleanAddressLine2 = sanitizeText(address_line_2);
+    const cleanCity = sanitizeText(city);
+    const cleanState = sanitizeText(state);
+    const cleanCountry = sanitizeText(country);
+
     const result = await pool.query(
       `INSERT INTO addresses 
       (address_id, customer_id, full_name, phone, address_line_1, address_line_2, city, state, pincode, country, is_default)
@@ -234,14 +258,14 @@ export const customerOnboarding = async (req, res) => {
       RETURNING *`,
       [
         id,
-        full_name,
+        cleanFullName,
         phone,
-        address_line_1,
-        address_line_2,
-        city,
-        state,
+        cleanAddressLine1,
+        cleanAddressLine2,
+        cleanCity,
+        cleanState,
         pincode,
-        country,
+        cleanCountry,
         is_default ?? true,
       ]
     );
@@ -312,12 +336,14 @@ export const updateCustomer = async (req, res) => {
       });
     }
 
+    const cleanFullName = sanitizeText(full_name);
+
     const result = await pool.query(
       `UPDATE customers 
        SET full_name = $1, phone = $2, date_of_birth = $3, gender = $4, profile_picture_url = $5 
        WHERE customer_id = $6 
        RETURNING customer_id, full_name, email, phone, date_of_birth, gender, profile_picture_url`,
-      [full_name, phone, date_of_birth || null, gender || null, profile_picture_url || null, id]
+      [cleanFullName, phone, date_of_birth || null, gender || null, profile_picture_url || null, id]
     );
 
     if (result.rows.length === 0) {

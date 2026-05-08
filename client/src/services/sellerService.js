@@ -73,7 +73,7 @@ export const getSellerFinanceAnalytics = async (sellerId) => {
 };
 export const getOrderDetails = async (orderId) => {
   try {
-    const res = await api.get(`/order/order/${orderId}`);
+    const res = await api.get(`/orders/order/${orderId}`);
     return res.data;
   } catch (error) {
     return error.response?.data || { success: false, message: 'Failed to fetch order details' };
@@ -82,7 +82,7 @@ export const getOrderDetails = async (orderId) => {
 
 export const updateOrderStatus = async (orderId, data) => {
   try {
-    const res = await api.patch(`/order/status/${orderId}`, data);
+    const res = await api.patch(`/orders/status/${orderId}`, data);
     return res.data;
   } catch (error) {
     return error.response?.data || { success: false, message: 'Failed to update order status' };

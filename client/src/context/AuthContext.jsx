@@ -29,12 +29,18 @@ export function AuthProvider({ children }) {
     const { token, ...userWithoutToken } = user;
     const formattedUser = { ...userWithoutToken, role };
     setCurrentUser(formattedUser);
+    localStorage.setItem('user', JSON.stringify(formattedUser));
+    localStorage.setItem('auth', 'true');
+    localStorage.removeItem('seller'); // Isolate contexts
   };
 
   const loginSeller = (sellerData) => {
     const { token, ...sellerWithoutToken } = sellerData;
     const formattedSeller = { ...sellerWithoutToken, role: 'seller' };
     setCurrentUser(formattedSeller);
+    localStorage.setItem('seller', JSON.stringify(formattedSeller));
+    localStorage.removeItem('user'); // Isolate contexts
+    localStorage.removeItem('auth');
   };
 
   const logoutUser = async () => {

@@ -13,10 +13,17 @@ export const createOrder = async (req, res) => {
       payment_id, // Razorpay payment ID
       razorpay_order_id,
       razorpay_signature,
-      shipping_charges = 0,
       discount_amount = 0,
       coupon_id = null
     } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: "Cart cannot be empty. Please add items to your cart." });
+    }
+
+    if (items.length > 50) {
+      return res.status(400).json({ success: false, message: "Order exceeds maximum limit of 50 distinct items. Please split your order." });
+    }
 
     const customer_id = req.user.id;
 
@@ -73,7 +80,19 @@ export const createOrder = async (req, res) => {
     let serverCalculatedSubtotal = 0;
     const sellerSubtotals = {};
     const processedItems = [];
-    const commissionRate = 0.10; // Default 10%
+
+    // Fetch global default commission rate from system_config (with 10% default fallback)
+    let globalCommissionRate = 0.10;
+    try {
+      const configRes = await client.query("SELECT value FROM system_config WHERE key = 'commission_rate'");
+      if (configRes.rows.length > 0) {
+        globalCommissionRate = parseFloat(configRes.rows[0].value);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch global commission_rate, falling back to 0.10:", err.message);
+    }
+
+    const sellerCommissionRates = {};
 
     for (const item of items) {
       const qty = parseInt(item.quantity);
@@ -116,6 +135,23 @@ export const createOrder = async (req, res) => {
       const itemTotal = dbPrice * qty;
       serverCalculatedSubtotal += itemTotal;
       
+      let currentCommissionRate = globalCommissionRate;
+      if (dbSellerId) {
+        if (sellerCommissionRates[dbSellerId] !== undefined) {
+          currentCommissionRate = sellerCommissionRates[dbSellerId];
+        } else {
+          try {
+            const sellerRes = await client.query("SELECT commission_rate FROM sellers WHERE seller_id = $1", [dbSellerId]);
+            if (sellerRes.rows.length > 0 && sellerRes.rows[0].commission_rate !== null) {
+              currentCommissionRate = parseFloat(sellerRes.rows[0].commission_rate);
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch custom commission_rate for seller ${dbSellerId}:`, err.message);
+          }
+          sellerCommissionRates[dbSellerId] = currentCommissionRate;
+        }
+      }
+
       if (dbSellerId) {
         sellerSubtotals[dbSellerId] = (sellerSubtotals[dbSellerId] || 0) + itemTotal;
       }
@@ -126,7 +162,8 @@ export const createOrder = async (req, res) => {
         seller_id: dbSellerId,
         quantity: qty,
         unit_price: dbPrice,
-        total_price: itemTotal
+        total_price: itemTotal,
+        commission_rate: currentCommissionRate
       });
     }
 
@@ -170,12 +207,15 @@ export const createOrder = async (req, res) => {
       }
     }
 
+    // Cap the coupon discount to the subtotal to prevent negative cart total calculations
+    serverDiscountAmount = Math.min(serverDiscountAmount, serverCalculatedSubtotal);
+
     // 5. Final Order Calculations
     const final_tax_amount = Math.round(serverCalculatedSubtotal * 0.05); // 5% Tax
     const final_platform_fee = 10;
     const final_cod_fee = payment_method === 'cod' ? 50 : 0;
     const final_shipping = serverCalculatedSubtotal > 1000 ? 0 : 40;
-    const final_total_amount = serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount;
+    const final_total_amount = Math.max(0, serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount);
 
     // 6. Insert into orders
     await client.query(
@@ -202,13 +242,14 @@ export const createOrder = async (req, res) => {
       const order_item_id = orderItemRes.rows[0].order_item_id;
 
       const sale_amount = item.total_price;
-      const commission_amount = sale_amount * commissionRate;
+      const commission_rate = item.commission_rate;
+      const commission_amount = sale_amount * commission_rate;
       const seller_earnings = sale_amount - commission_amount;
 
       await client.query(
         `INSERT INTO seller_commissions (commission_id, order_id, order_item_id, seller_id, sale_amount, commission_rate, commission_amount, seller_earnings, status)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'Pending')`,
-        [order_id, order_item_id, item.seller_id, sale_amount, commissionRate, commission_amount, seller_earnings]
+        [order_id, order_item_id, item.seller_id, sale_amount, commission_rate, commission_amount, seller_earnings]
       );
     }
 
@@ -416,9 +457,23 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    if (req.user.type === 'customer' && orderCheck.rows[0].customer_id !== req.user.id) {
+    const order = orderCheck.rows[0];
+
+    if (req.user.type === 'customer' && order.customer_id !== req.user.id) {
       client.release();
       return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    // State-machine Guard: Customers can only cancel orders in 'Pending' or 'Processing' status
+    if (req.user.type === 'customer' && status === 'Cancelled') {
+      const allowedCancellationStatuses = ['Pending', 'Processing'];
+      if (!allowedCancellationStatuses.includes(order.order_status)) {
+        client.release();
+        return res.status(400).json({
+          success: false,
+          message: `Cannot cancel an order that is already ${order.order_status}`
+        });
+      }
     }
 
     if (req.user.type === 'seller') {

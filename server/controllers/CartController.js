@@ -147,6 +147,39 @@ export const addToCart = async (req, res) => {
             [cart_id, product_id, variant_id || null]
         );
 
+        let targetQuantity = quantity;
+        if (existing.rows.length > 0) {
+            targetQuantity += existing.rows[0].quantity;
+        }
+
+        if (targetQuantity > 100) {
+            throw new Error("Quantity in cart cannot exceed 100 units per item.");
+        }
+
+        // Fetch stock of product / variant
+        let stockQuantity = 0;
+        let productName = '';
+        if (variant_id) {
+            const vStock = await client.query(
+                "SELECT pv.stock_quantity, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 AND pv.product_id = $2",
+                [variant_id, product_id]
+            );
+            if (vStock.rows.length > 0) {
+                stockQuantity = vStock.rows[0].stock_quantity;
+                productName = vStock.rows[0].name;
+            }
+        } else {
+            const pStock = await client.query("SELECT stock_quantity, name FROM products WHERE product_id = $1", [product_id]);
+            if (pStock.rows.length > 0) {
+                stockQuantity = pStock.rows[0].stock_quantity;
+                productName = pStock.rows[0].name;
+            }
+        }
+
+        if (targetQuantity > stockQuantity) {
+            throw new Error(`Only ${stockQuantity} units of '${productName}' are currently in stock.`);
+        }
+
         if (existing.rows.length > 0) {
             // Increment quantity and update price to secure DB price
             await client.query(
@@ -237,6 +270,39 @@ export const updateCartItem = async (req, res) => {
 
         if (req.user.id !== ownershipCheck.rows[0].customer_id && req.user.type !== 'admin') {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
+        }
+
+        const qty = parseInt(quantity);
+        if (!isNaN(qty) && qty > 100) {
+            return res.status(400).json({ success: false, message: 'Quantity cannot exceed 100 units per item.' });
+        }
+
+        if (!isNaN(qty) && qty > 0) {
+            // Fetch actual stock
+            const stockCheck = await client.query(
+                `SELECT 
+                    ci.product_id, 
+                    ci.variant_id,
+                    p.name AS product_name,
+                    COALESCE(pv.stock_quantity, p.stock_quantity) AS stock_quantity
+                 FROM cart_items ci
+                 JOIN products p ON ci.product_id = p.product_id
+                 LEFT JOIN product_variants pv ON ci.variant_id = pv.variant_id
+                 WHERE ci.cart_item_id = $1`,
+                [cart_item_id]
+            );
+
+            if (stockCheck.rows.length === 0) {
+                return res.status(404).json({ success: false, message: 'Cart item or associated product not found.' });
+            }
+
+            const { stock_quantity, product_name } = stockCheck.rows[0];
+            if (qty > stock_quantity) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Cannot update quantity to ${qty}. Only ${stock_quantity} units of '${product_name}' are currently in stock.` 
+                });
+            }
         }
 
         await client.query('BEGIN');

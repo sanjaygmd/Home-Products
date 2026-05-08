@@ -79,7 +79,6 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
         platform_fee: 10,
         cod_fee: paymentMethod === "cod" ? 50 : 0,
         tax_amount: Math.round(subtotalValue * 0.05),
-        shipping_charges: 0,
         coupon_id: appliedCoupon?.coupon_id || null,
         discount_amount: discountValue,
         total_amount: total

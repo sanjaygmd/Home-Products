@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "nodemon server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "author": "Sanjay",
   "license": "ISC",
@@ -23,6 +23,9 @@
     "nodemailer": "^8.0.5",
     "nodemon": "^3.1.14",
     "pg": "^8.20.0",
-    "twilio": "^5.13.1"
+    "sanitize-html": "^2.17.3",
+    "supertest": "^7.0.0",
+    "twilio": "^5.13.1",
+    "vitest": "^1.6.0"
   }
 }

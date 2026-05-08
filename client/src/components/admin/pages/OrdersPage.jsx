@@ -463,7 +463,7 @@ export default function OrdersPage() {
 
   const handleUpdateStatus = async () => {
     try {
-      const resp = await api.patch(`/order/status/${selectedOrder.id}`, {
+      const resp = await api.patch(`/orders/status/${selectedOrder.id}`, {
         status: editStatus,
         courier: editCourier,
         tracking_id: editTrackingId,

@@ -49,6 +49,26 @@ export const runSchemaMigrations = async () => {
         ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(10,2) DEFAULT 0.00
     `);
 
+    // 5. Ensure system_config table exists with default commission_rate
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS system_config (
+            key VARCHAR(255) PRIMARY KEY,
+            value VARCHAR(255) NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    await pool.query(`
+        INSERT INTO system_config (key, value)
+        VALUES ('commission_rate', '0.10')
+        ON CONFLICT (key) DO NOTHING;
+    `);
+
+    // 6. Ensure sellers table has a custom commission_rate column
+    await pool.query(`
+        ALTER TABLE sellers 
+        ADD COLUMN IF NOT EXISTS commission_rate DECIMAL(5,2) DEFAULT NULL
+    `);
+
     console.log("[MIGRATOR] All schema migrations ran successfully.");
   } catch (err) {
     console.error("[MIGRATOR] Schema migrations FAILED:", err.message);

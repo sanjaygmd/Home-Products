@@ -1,5 +1,6 @@
 import { pool } from "../configs/db.js";
 import { logAction } from "../utils/auditLogger.js";
+import { sanitizeText, sanitizeDescription } from "../utils/sanitizer.js";
 
 export const addProduct = async (req, res) => {
     try {
@@ -26,12 +27,20 @@ export const addProduct = async (req, res) => {
             discount_percent
         } = req.body;
 
-        if (!name || !price || !category_id) {
+        const cleanName = sanitizeText(name);
+        if (!cleanName || !price || !category_id) {
             return res.status(400).json({
                 success: false,
                 message: "Required fields missing (name, price, category_id)"
             });
         }
+
+        const cleanDescription = sanitizeDescription(description);
+        const cleanBrand = sanitizeText(brand);
+        const cleanColor = sanitizeText(color);
+        const cleanSize = sanitizeText(size);
+        const cleanRoom = sanitizeText(room);
+        const cleanSku = sanitizeText(sku);
 
         const client = await pool.connect();
         try {
@@ -47,9 +56,9 @@ export const addProduct = async (req, res) => {
             [
                 category_id,
                 sellerIdToUse,
-                name,
-                description,
-                sku,
+                cleanName,
+                cleanDescription,
+                cleanSku,
                 price,
                 mrp,
                 stock_quantity || 0,
@@ -57,12 +66,12 @@ export const addProduct = async (req, res) => {
                 length || 0,
                 breadth || 0,
                 height || 0,
-                brand,
+                cleanBrand,
                 (images && images.length > 0) ? images.map(img => typeof img === 'string' ? img : img.url) : [],
-                slug || name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
-                color,
-                size,
-                room,
+                slug || cleanName.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
+                cleanColor,
+                cleanSize,
+                cleanRoom,
                 discount_percent || 0
             ]
         );
@@ -316,6 +325,12 @@ export const updateProduct = async (req, res) => {
         weight, length, breadth, height, variants // Array of variants to sync
     } = req.body;
 
+    const cleanName = name !== undefined ? sanitizeText(name) : undefined;
+    const cleanDescription = description !== undefined ? sanitizeDescription(description) : undefined;
+    const cleanBrand = brand !== undefined ? sanitizeText(brand) : undefined;
+    const cleanRoom = room !== undefined ? sanitizeText(room) : undefined;
+    const cleanSku = sku !== undefined ? sanitizeText(sku) : undefined;
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -352,8 +367,8 @@ export const updateProduct = async (req, res) => {
                  updated_at = NOW()
              WHERE product_id = $15 RETURNING *`,
             [
-                name, description, price, mrp, stock_quantity,
-                brand, category_id, room, discount_percent, sku,
+                cleanName, cleanDescription, price, mrp, stock_quantity,
+                cleanBrand, category_id, cleanRoom, discount_percent, cleanSku,
                 weight, length, breadth, height,
                 product_id
             ]
@@ -370,7 +385,10 @@ export const updateProduct = async (req, res) => {
             for (const v of variants) {
                 const vid = (v.variant_id || v.id || v.tempId);
                 const isNew = !vid || String(vid).startsWith('v_');
-                const variantSku = v.sku || `${sku || result.rows[0].sku}-var-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+                const variantSku = v.sku || `${cleanSku || result.rows[0].sku}-var-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+
+                const cleanVariantName = sanitizeText(v.variant_name || v.name || 'Variant');
+                const cleanVariantValue = sanitizeText(v.variant_value || v.value || 'Standard');
 
                 if (isNew) {
                     await client.query(
@@ -379,12 +397,12 @@ export const updateProduct = async (req, res) => {
                         [
                             product_id,
                             variantSku,
-                            v.variant_name || v.name || 'Variant',
-                            v.variant_value || v.value || 'Standard',
+                            cleanVariantName,
+                            cleanVariantValue,
                             v.price || price,
                             v.stock_quantity || v.stock || 0,
                             v.weight || 0,
-                            name || result.rows[0].name // Use new parent name if provided, else existing
+                            cleanName || result.rows[0].name // Use new parent name if provided, else existing
                         ]
                     );
                 } else {
@@ -392,7 +410,7 @@ export const updateProduct = async (req, res) => {
                         `UPDATE product_variants 
                          SET variant_name = $1, variant_value = $2, price = $3, stock_quantity = $4, weight = $5, sku = $6
                          WHERE variant_id = $7 AND product_id = $8`,
-                        [v.variant_name || v.name || 'Variant', v.variant_value || v.value || 'Standard', v.price || price, v.stock_quantity || v.stock || 0, v.weight || 0, variantSku, vid, product_id]
+                        [cleanVariantName, cleanVariantValue, v.price || price, v.stock_quantity || v.stock || 0, v.weight || 0, variantSku, vid, product_id]
                     );
                 }
             }
