@@ -48,6 +48,7 @@ import cartRoutes from './routes/CartRoutes.js';
 import wishlistRoutes from './routes/WishlistRoutes.js';
 import orderRoutes from './routes/OrderRoutes.js';
 import shiprocketRoutes from './routes/shiprocketRoutes.js';
+import chatbotRoutes from './routes/chatbotRoutes.js';
 import { runMigration as runSystemConfigMigration } from './migrations/systemConfigMigration.js';
 import { fixSellerConstraints } from './migrations/fix_seller_constraints.js';
 import { pruneExpiredRecords } from './utils/cleanupTask.js';
@@ -169,6 +170,7 @@ app.use('/cart', cartRoutes);
 app.use('/wishlist', wishlistRoutes);
 app.use('/orders', orderRoutes);
 app.use('/shipping', shiprocketRoutes);
+app.use('/chatbot', chatbotRoutes);
 
 // Removed /schema-test for security
 

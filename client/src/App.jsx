@@ -66,6 +66,7 @@ import { AdminSearchProvider } from './components/admin/contexts/AdminSearchCont
 
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
+import ChatbotWidget from './components/layout/Chatbot/ChatbotWidget.jsx';
 
 function App() {
 
@@ -194,6 +195,7 @@ function MainApp() {
                       <Route path="administrators" element={<AdministratorsPage />} />
                     </Route>
                   </Routes>
+                  <ChatbotWidget />
                 </WishListProvider>
               </CartProvider>
             </ProductProvider>
