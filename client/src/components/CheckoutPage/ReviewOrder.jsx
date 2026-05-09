@@ -1,6 +1,5 @@
 import { card, buttonSecondary } from "../../utils/UIStyles";
 import { useNavigate } from "react-router-dom";
-import emailjs from "emailjs-com";
 import { useContext, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { CartContext } from "../../context/CartContext/CartContext";
@@ -25,34 +24,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
       : Math.min((subtotalValue * (appliedCoupon.discount_percent || 0)) / 100, appliedCoupon.max_discount || Infinity)
     : 0;
 
-  const sendOrderEmail = (orderId) => {
-    const templateParams = {
-      customer_name: userDetails?.name,
-      customer_email: currentUser?.email,
-      phone: userDetails?.phone,
-      address: `${userDetails?.address}, ${userDetails?.city}, ${userDetails?.state} - ${userDetails?.pincode}`,
-      payment_method:
-        paymentMethod === "cod" ? "Cash on Delivery" : "Online Payment",
-      total_amount: total,
-      order_id: orderId
-    };
 
-    emailjs
-      .send(
-        import.meta.env.VITE_EMAILJS_SERVICE_ID,
-        import.meta.env.VITE_EMAILJS_ORDER_TEMPLATE_ID,
-        templateParams,
-        import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
-      )
-      .then(
-        (response) => {
-          // Success
-        },
-        (error) => {
-          console.error("Email failed", error);
-        },
-      );
-  };
 
   const handlePlaceOrder = async () => {
     if (isAdmin) {
@@ -90,7 +62,6 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
         const response = await createOrder(orderData);
         if (response.success) {
           try {
-            sendOrderEmail(response.order_id);
             fetchCart();
             if (fetchProducts) fetchProducts();
           } catch (cleanupErr) {
@@ -116,7 +87,6 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
               });
               if (dbResponse.success) {
                 try {
-                  sendOrderEmail(dbResponse.order_id);
                   fetchCart();
                   if (fetchProducts) fetchProducts();
                 } catch (cleanupErr) {

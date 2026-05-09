@@ -26,8 +26,12 @@ export const handleChatMessage = async (req, res, next) => {
     try {
         const { message, history = [] } = req.body;
 
-        if (!message) {
-            return res.status(400).json({ success: false, message: "Message is required." });
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ success: false, message: "Message is required and must be a string." });
+        }
+
+        if (message.trim().length > 500) {
+            return res.status(400).json({ success: false, message: "Message exceeds maximum length of 500 characters." });
         }
 
         // 1. Fetch Store Context from PostgreSQL Database with defensive try/catch blocks
@@ -178,7 +182,10 @@ ${userContextString}
         for (const modelName of candidateModels) {
             try {
                 console.log(`[CHATBOT] Attempting communication using model: ${modelName}`);
-                const model = client.getGenerativeModel({ model: modelName });
+                const model = client.getGenerativeModel({ 
+                    model: modelName,
+                    systemInstruction: systemInstruction
+                });
                 
                 // Start chat with history
                 const chat = model.startChat({
@@ -189,9 +196,7 @@ ${userContextString}
                     }
                 });
 
-                // Prepend the System Instructions & DB Context directly to the user's message as instructions
-                const promptMessage = `${systemInstruction}\n\nUSER CURRENT MESSAGE: "${message}"`;
-                const result = await chat.sendMessage(promptMessage);
+                const result = await chat.sendMessage(message.trim());
                 
                 replyText = result.response.text();
                 console.log(`[CHATBOT SUCCESS] Message processed successfully using model: ${modelName}`);

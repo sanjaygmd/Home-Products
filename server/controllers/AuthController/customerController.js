@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import { generateOtp, hashOtp } from "../../utils/otp.js";
 import { sendEmailOtp } from "../../utils/email.js";
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
-import { sanitizeText } from "../../utils/sanitizer.js";
+import { sanitizeText, isValidImageUrl } from "../../utils/sanitizer.js";
+import { isPasswordStrong } from "../../utils/validation.js";
 
 export const loginCustomer = async (req, res) => {
   try {
@@ -144,10 +145,17 @@ export const registerCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Phone number must be 10 digits" });
     }
 
-    if (password.length < 8) {
+    if (!isPasswordStrong(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters",
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.",
+      });
+    }
+
+    if (profile_picture_url && !isValidImageUrl(profile_picture_url)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid profile picture URL format. Only valid image URLs are allowed.",
       });
     }
 
@@ -327,6 +335,13 @@ export const updateCustomer = async (req, res) => {
     // Ownership Check
     if (req.user.id !== id && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    if (profile_picture_url && !isValidImageUrl(profile_picture_url)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid profile picture URL format. Only valid image URLs are allowed.",
+      });
     }
 
     if (!full_name || !phone) {
@@ -534,7 +549,7 @@ export const sendOTP = async (req, res) => {
     }
 
     const otp = generateOtp();
-    const otp_hash = hashOtp(otp);
+    const otp_hash = hashOtp(otp, email);
     const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await pool.query(
@@ -587,7 +602,7 @@ export const verifyOTP = async (req, res) => {
       return res.status(400).json({ success: false, message: "Too many failed attempts" });
     }
 
-    const hashedInput = hashOtp(otp);
+    const hashedInput = hashOtp(otp, email);
     if (hashedInput !== otpData.otp_hash) {
       await pool.query(
         "UPDATE otp_verifications SET attempts = attempts + 1 WHERE otp_id = $1",

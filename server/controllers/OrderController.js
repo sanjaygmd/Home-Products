@@ -1,5 +1,6 @@
 import { pool } from '../configs/db.js';
 import { pushOrderToShiprocket, cancelShipment } from './ShipmentController.js';
+import { sendOrderConfirmationEmail } from '../utils/email.js';
 import { processAutoPayout } from './PayoutController.js';
 import crypto from 'crypto';
 
@@ -316,6 +317,23 @@ export const createOrder = async (req, res) => {
     pushOrderToShiprocket(order_id).catch(srError => {
         console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
     });
+
+    // Send order confirmation email securely from the backend (fire and forget)
+    try {
+      const custRes = await client.query("SELECT email, full_name FROM customers WHERE customer_id = $1", [customer_id]);
+      if (custRes.rows.length > 0) {
+        const customerEmail = custRes.rows[0].email;
+        const customerName = custRes.rows[0].full_name;
+        sendOrderConfirmationEmail(customerEmail, {
+          orderId: order_id,
+          totalAmount: final_total_amount,
+          paymentMethod: payment_method,
+          customerName: customerName
+        }).catch(() => {});
+      }
+    } catch (emailErr) {
+      console.error("[EMAIL ERROR] Failed to send order confirmation email:", emailErr.message);
+    }
 
     res.status(201).json({ success: true, message: "Order placed successfully", order_id });
 

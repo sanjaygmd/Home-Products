@@ -3,7 +3,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
 import { createShiprocketReturn } from "../ShipmentController.js";
-import { sanitizeText, sanitizeDescription } from "../../utils/sanitizer.js";
+import { sanitizeText, sanitizeDescription, isValidImageUrl } from "../../utils/sanitizer.js";
+import { isPasswordStrong } from "../../utils/validation.js";
 
 export const logoutSeller = async (req, res) => {
   try {
@@ -205,10 +206,17 @@ export const registerSeller = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    if (!isPasswordStrong(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters",
+        message: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.",
+      });
+    }
+
+    if (store_logo && !isValidImageUrl(store_logo)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid store logo URL format. Only valid image URLs are allowed.",
       });
     }
 
@@ -276,6 +284,13 @@ export const sellerOnboarding = async (req, res) => {
     // Ownership Check
     if (req.user.id !== sellerId && !['admin', 'super_admin'].includes(req.user.type)) {
       return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
+    if (logo_url && !isValidImageUrl(logo_url)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid store logo URL format. Only valid image URLs are allowed.",
+      });
     }
 
     const {

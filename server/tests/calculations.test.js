@@ -19,7 +19,7 @@ function calculateOrderTotals({ subtotal, paymentMethod, coupon }) {
   const taxAmount = Math.round(subtotal * 0.05); // 5% Tax
   const platformFee = 10;
   const codFee = paymentMethod === 'cod' ? 50 : 0;
-  const shippingCharges = subtotal > 1000 ? 0 : 40;
+  const shippingCharges = subtotal > 5000 ? 0 : 150;
   
   const totalAmount = Math.max(0, subtotal + shippingCharges + taxAmount + platformFee + codFee - discountAmount);
 
@@ -43,24 +43,24 @@ describe('Order Financial Calculations & Rules', () => {
     });
 
     expect(totals.subtotal).toBe(500);
-    expect(totals.shippingCharges).toBe(40); // Subtotal <= 1000
+    expect(totals.shippingCharges).toBe(150); // Subtotal <= 5000
     expect(totals.taxAmount).toBe(25); // 5% of 500
     expect(totals.platformFee).toBe(10);
     expect(totals.codFee).toBe(0);
     expect(totals.discountAmount).toBe(0);
-    expect(totals.totalAmount).toBe(575); // 500 + 40 + 25 + 10 = 575
+    expect(totals.totalAmount).toBe(685); // 500 + 150 + 25 + 10 = 685
   });
 
-  it('should apply free shipping for subtotal above 1000', () => {
+  it('should apply free shipping for subtotal above 5000', () => {
     const totals = calculateOrderTotals({
-      subtotal: 1200,
+      subtotal: 6000,
       paymentMethod: 'online',
       coupon: null
     });
 
     expect(totals.shippingCharges).toBe(0); // Free shipping
-    expect(totals.taxAmount).toBe(60); // 5% of 1200
-    expect(totals.totalAmount).toBe(1270); // 1200 + 0 + 60 + 10 = 1270
+    expect(totals.taxAmount).toBe(300); // 5% of 6000
+    expect(totals.totalAmount).toBe(6310); // 6000 + 0 + 300 + 10 = 6310
   });
 
   it('should apply 50 COD fee for cash-on-delivery orders', () => {
@@ -71,7 +71,7 @@ describe('Order Financial Calculations & Rules', () => {
     });
 
     expect(totals.codFee).toBe(50);
-    expect(totals.totalAmount).toBe(625); // 500 + 40 + 25 + 10 + 50 = 625
+    expect(totals.totalAmount).toBe(735); // 500 + 150 + 25 + 10 + 50 = 735
   });
 
   it('should apply percentage coupon with maximum cap', () => {
@@ -86,7 +86,7 @@ describe('Order Financial Calculations & Rules', () => {
     });
 
     expect(totals.discountAmount).toBe(100);
-    expect(totals.totalAmount).toBe(1000);
+    expect(totals.totalAmount).toBe(1110);
   });
 
   it('should cap coupon discount to subtotal value to prevent negative totals', () => {
@@ -100,6 +100,6 @@ describe('Order Financial Calculations & Rules', () => {
     });
 
     expect(totals.discountAmount).toBe(100); // capped at subtotal 100
-    expect(totals.totalAmount).toBe(55); // 100 + 40 (shipping) + 5 (tax) + 10 (fee) - 100 = 55
+    expect(totals.totalAmount).toBe(165); // 100 + 150 (shipping) + 5 (tax) + 10 (fee) - 100 = 165
   });
 });

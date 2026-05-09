@@ -1,4 +1,5 @@
 import { pool } from '../configs/db.js';
+import { sendCartAddEmail } from '../utils/email.js';
 
 // Helper: get or create cart for customer
 const getOrCreateCart = async (client, customer_id) => {
@@ -232,6 +233,17 @@ export const addToCart = async (req, res) => {
         );
         
         const cartInfo = await pool.query('SELECT total_amount, item_count, updated_at FROM cart WHERE cart_id = $1', [cart_id]);
+
+        // Send cart notification email securely from the backend (fire and forget)
+        try {
+            const custEmailRes = await pool.query("SELECT email FROM customers WHERE customer_id = $1", [customer_id]);
+            if (custEmailRes.rows.length > 0) {
+                const customerEmail = custEmailRes.rows[0].email;
+                sendCartAddEmail(customerEmail, productName).catch(() => {});
+            }
+        } catch (emailErr) {
+            console.error("[EMAIL ERROR] Failed to query customer email for cart notification:", emailErr.message);
+        }
 
         return res.status(200).json({ 
             success: true, 

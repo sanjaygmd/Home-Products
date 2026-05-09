@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import emailjs from "@emailjs/browser";
 import { CartContext } from "./CartContext";
 import * as cartService from "../../services/cartService";
 import { useAuth } from "../AuthContext";
@@ -90,15 +89,7 @@ export const CartProvider = ({ children }) => {
       // Fetch real state from DB (no temp IDs, no race conditions)
       await fetchCart();
 
-      // Email notification (fire and forget)
-      emailjs
-        .send(
-          import.meta.env.VITE_EMAILJS_SERVICE_ID,
-          import.meta.env.VITE_EMAILJS_CART_TEMPLATE_ID,
-          { product_name: product.name, to_email: currentUser?.email },
-          import.meta.env.VITE_EMAILJS_PUBLIC_KEY
-        )
-        .catch(() => {});
+
     } finally {
       pendingOps.current.delete(opKey);
     }
