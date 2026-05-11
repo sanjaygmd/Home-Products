@@ -56,7 +56,8 @@ export function AuthProvider({ children }) {
 
   const logoutUser = async () => {
     try {
-      await authServiceLogout();
+      const role = currentUser?.role;
+      await authServiceLogout(role);
     } catch (error) {
       console.error("Logout error:", error);
     } finally {

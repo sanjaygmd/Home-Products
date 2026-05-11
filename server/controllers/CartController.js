@@ -181,7 +181,9 @@ export const addToCart = async (req, res) => {
             throw new Error(`Only ${stockQuantity} units of '${productName}' are currently in stock.`);
         }
 
-        if (existing.rows.length > 0) {
+        const isNewItem = existing.rows.length === 0;
+
+        if (!isNewItem) {
             // Increment quantity and update price to secure DB price
             await client.query(
                 'UPDATE cart_items SET quantity = quantity + $1, price = $2, updated_at = NOW() WHERE cart_item_id = $3',
@@ -234,16 +236,19 @@ export const addToCart = async (req, res) => {
         
         const cartInfo = await pool.query('SELECT total_amount, item_count, updated_at FROM cart WHERE cart_id = $1', [cart_id]);
 
-        // Send cart notification email securely from the backend (fire and forget)
-        try {
-            const custEmailRes = await pool.query("SELECT email FROM customers WHERE customer_id = $1", [customer_id]);
-            if (custEmailRes.rows.length > 0) {
-                const customerEmail = custEmailRes.rows[0].email;
-                sendCartAddEmail(customerEmail, productName).catch(() => {});
+        // Send cart notification email only for brand-new item additions (not quantity increments)
+        if (isNewItem) {
+            try {
+                const custEmailRes = await pool.query("SELECT email FROM customers WHERE customer_id = $1", [customer_id]);
+                if (custEmailRes.rows.length > 0) {
+                    const customerEmail = custEmailRes.rows[0].email;
+                    sendCartAddEmail(customerEmail, productName).catch(() => {});
+                }
+            } catch (emailErr) {
+                console.error("[EMAIL ERROR] Failed to query customer email for cart notification:", emailErr.message);
             }
-        } catch (emailErr) {
-            console.error("[EMAIL ERROR] Failed to query customer email for cart notification:", emailErr.message);
         }
+
 
         return res.status(200).json({ 
             success: true, 

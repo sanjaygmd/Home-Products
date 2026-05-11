@@ -1738,6 +1738,11 @@ export const changeAdminPassword = async (req, res) => {
     const targetInfo = await pool.query(`SELECT name, email FROM ${table} WHERE ${idCol} = $1`, [id]);
     const { name, email } = targetInfo.rows[0];
 
+    if (!process.env.JWT_SECRET) {
+      console.error('CRITICAL: JWT_SECRET is not configured. Password reset emails cannot be sent.');
+      return res.status(500).json({ success: false, message: 'Server configuration error: password reset is not available. Please contact the system administrator.' });
+    }
+
     const token = jwt.sign(
       { id, email, table, idCol, purpose: 'admin_password_reset' },
       process.env.JWT_SECRET,
@@ -2251,6 +2256,9 @@ export const resetPasswordViaLink = async (req, res) => {
     // Verify JWT
     let decoded;
     try {
+      if (!process.env.JWT_SECRET) {
+        return res.status(500).json({ success: false, message: 'Server configuration error: token verification unavailable.' });
+      }
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(400).json({ success: false, message: "Invalid or expired password reset link." });

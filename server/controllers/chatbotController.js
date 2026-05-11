@@ -140,13 +140,96 @@ export const handleChatMessage = async (req, res, next) => {
             }
         }
 
-        // 3. Format Context for Gemini Prompt
-        const userContextString = customerProfile 
-            ? `Logged-in Customer Name: ${customerProfile.full_name}\nEmail: ${customerProfile.email}\nPhone: ${customerProfile.phone}\nRecent Orders:\n${JSON.stringify(recentOrders, null, 2)}`
-            : "Guest User (Not logged in. If they ask about their orders or track status, kindly advise them to log in to see personalized order updates, or they can provide an Order ID and you will search it).";
+        // 3. Format Context and Instructions dynamically based on Authenticated User Role
+        let systemInstruction = "";
+        const userRole = req.user ? req.user.type : 'guest';
 
-        // Build the System Instruction to guide the AI's behavior
-        const systemInstruction = `
+        if (userRole === 'seller') {
+            // Retrieve seller context
+            let sellerProfile = null;
+            let sellerProducts = [];
+            try {
+                const sellerRes = await pool.query(`
+                    SELECT s.seller_id, s.store_name, s.rating, s.commission_rate, s.is_verified
+                    FROM sellers s
+                    WHERE s.seller_id = $1
+                `, [req.user.id]);
+                if (sellerRes.rows.length > 0) {
+                    sellerProfile = sellerRes.rows[0];
+                }
+                
+                const sellerProdRes = await pool.query(`
+                    SELECT product_id, name, price, stock, is_active
+                    FROM products
+                    WHERE seller_id = $1 AND deleted_at IS NULL
+                    LIMIT 10
+                `, [req.user.id]);
+                sellerProducts = sellerProdRes.rows;
+            } catch (err) {
+                console.warn("[CHATBOT WARNING] Failed to fetch seller context:", err.message);
+            }
+
+            systemInstruction = `
+You are "GMD Merchant Coach", an encouraging, professional, and data-driven seller growth advisor for GMD Home-Products sellers.
+Your goal is to help GMD merchants maximize their sales, understand system fees, optimize product listings, and explain platform seller policies.
+
+---
+STRICT BOUNDARIES:
+1. FEE EXPLANATION: Explain GMD seller commissions. Our standard default platform commission is 10%, but highlight their specific store rate from their profile if present.
+2. LISTING OPTIMIZATION: Guide them on how to write catchy product names, detailed descriptions, and suggest pricing adjustments to compete.
+3. TONAL STANDARD: Maintain a highly professional, polite, encouraging, and business-focused attitude. Use business and growth emojis (e.g. 📈, 🛍️, 💡, 🤝).
+4. SENSITIVE TRANSACTIONS: For payouts, withdrawals, or password resets, strictly instruct them to use their official Seller Dashboard portal settings. Do not execute or simulate actions.
+
+---
+SELLER PROFILE:
+${JSON.stringify(sellerProfile, null, 2)}
+
+---
+CURRENT STORE PRODUCTS LIST (MAX 10):
+${JSON.stringify(sellerProducts, null, 2)}
+`;
+        } else if (userRole === 'admin' || userRole === 'super_admin') {
+            // Retrieve admin systems stats context
+            let systemStats = {};
+            try {
+                const totalCustomers = await pool.query("SELECT COUNT(*) FROM customers WHERE is_active = true");
+                const totalSellers = await pool.query("SELECT COUNT(*) FROM sellers");
+                const totalProducts = await pool.query("SELECT COUNT(*) FROM products WHERE deleted_at IS NULL");
+                const totalOrders = await pool.query("SELECT COUNT(*) FROM orders");
+                const pendingSellers = await pool.query("SELECT COUNT(*) FROM sellers WHERE is_verified = false");
+                
+                systemStats = {
+                    activeCustomersCount: parseInt(totalCustomers.rows[0].count),
+                    registeredSellersCount: parseInt(totalSellers.rows[0].count),
+                    activeProductsCatalog: parseInt(totalProducts.rows[0].count),
+                    totalPlatformOrders: parseInt(totalOrders.rows[0].count),
+                    sellersAwaitingVerification: parseInt(pendingSellers.rows[0].count)
+                };
+            } catch (err) {
+                console.warn("[CHATBOT WARNING] Failed to fetch admin system stats:", err.message);
+            }
+
+            systemInstruction = `
+You are "GMD Store-Operations Command Center AI", a highly secure, analytical, and direct administrative operations co-pilot for the GMD Marketplace.
+Your goal is to assist platform administrators and super-admins with high-level system checks, marketplace statistics analysis, and operations lookup.
+
+---
+STRICT BOUNDARIES:
+1. SECURITY-FIRST CONTEXT: Keep your tone direct, analytical, secure, and professional. 
+2. DATA ACCURACY: Report the exact, real-time live platform statistics supplied below. Do not fabricate database stats.
+3. PRIVILEGE ADVISORY: If they ask how to perform actions (like verifying a seller, banning a user, or updating commissions), explain the exact steps to do so inside the Admin/Super-Admin control panels securely.
+4. TONAL STANDARD: Use professional administrative emojis (e.g. 📊, 🛡️, ⚙️, 💻). Avoid chatty or overly conversational phrasing.
+
+---
+LIVE PLATFORM STATISTICS:
+${JSON.stringify(systemStats, null, 2)}
+`;
+        } else {
+            const userContextString = customerProfile 
+                ? `Logged-in Customer Name: ${customerProfile.full_name}\nEmail: ${customerProfile.email}\nPhone: ${customerProfile.phone}\nRecent Orders:\n${JSON.stringify(recentOrders, null, 2)}`
+                : "Guest User (Not logged in. If they ask about their orders or track status, kindly advise them to log in to see personalized order updates, or they can provide an Order ID and you will search it).";
+
+            systemInstruction = `
 You are "GMD Home Assistant", a warm, polite, and expert home-design and furniture shopping assistant for GMD Home-Products.
 Your purpose is to answer user queries with politeness and help them find the perfect furniture, decor, and accessories for their living room, bedroom, kitchen, or any category.
 
@@ -170,6 +253,7 @@ ${JSON.stringify(categoriesList, null, 2)}
 CUSTOMER PROFILE & ORDERS:
 ${userContextString}
 `;
+        }
 
         // 4. Run AI Query (or fallback if API Key/SDK is not configured)
         const client = await getGeminiClient();
@@ -255,23 +339,33 @@ ${userContextString}
             throw lastError; // If all candidates failed, throw the error
         }
 
-        // 5. Generate Dynamic Quick Suggested Replies based on content context
+        // 5. Generate Dynamic Quick Suggested Replies based on user type and response context
         const suggestedReplies = [];
         const lowerReply = replyText.toLowerCase();
 
-        if (lowerReply.includes("order") || lowerReply.includes("track")) {
-            suggestedReplies.push("Track my active order");
-        }
-        if (lowerReply.includes("furniture") || lowerReply.includes("suggest") || lowerReply.includes("recommend") || lowerReply.includes("sofa") || lowerReply.includes("table")) {
-            suggestedReplies.push("Suggest living room decor");
-            suggestedReplies.push("Kitchen products list");
-        }
-        if (lowerReply.includes("return") || lowerReply.includes("refund")) {
-            suggestedReplies.push("What is your return policy?");
-        }
-        if (suggestedReplies.length === 0) {
-            suggestedReplies.push("Browse Categories");
-            suggestedReplies.push("View my profile");
+        if (userRole === 'seller') {
+            suggestedReplies.push("How to optimize my listings?");
+            suggestedReplies.push("What is my commission rate?");
+            suggestedReplies.push("Seller payout guide");
+        } else if (userRole === 'admin' || userRole === 'super_admin') {
+            suggestedReplies.push("Show platform health status");
+            suggestedReplies.push("Sellers awaiting verification");
+            suggestedReplies.push("Marketplace statistics summary");
+        } else {
+            if (lowerReply.includes("order") || lowerReply.includes("track")) {
+                suggestedReplies.push("Track my active order");
+            }
+            if (lowerReply.includes("furniture") || lowerReply.includes("suggest") || lowerReply.includes("recommend") || lowerReply.includes("sofa") || lowerReply.includes("table")) {
+                suggestedReplies.push("Suggest living room decor");
+                suggestedReplies.push("Kitchen products list");
+            }
+            if (lowerReply.includes("return") || lowerReply.includes("refund")) {
+                suggestedReplies.push("What is your return policy?");
+            }
+            if (suggestedReplies.length === 0) {
+                suggestedReplies.push("Browse Categories");
+                suggestedReplies.push("View my profile");
+            }
         }
 
         return res.json({

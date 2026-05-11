@@ -8,7 +8,7 @@ export const createAuthSession = async (userId, userType, ip, device, profile = 
 
   const result = await pool.query(
     `INSERT INTO auth_sessions (user_ref_id, user_type, token_hash, expires_at, last_ip, last_device, last_accessed_at, sudo_verified_at, user_profile)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NULL, $7)
      RETURNING session_id`,
     [userId, userType, tokenHash, expiresAt, ip, JSON.stringify(device), JSON.stringify(profile)]
   );

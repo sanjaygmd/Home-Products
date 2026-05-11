@@ -128,9 +128,15 @@ export const getCustomerAddresses = async (id) => {
   }
 };
 
-export const logoutUser = async () => {
+export const logoutUser = async (userType) => {
     try {
-        const res = await api.post('/user/customer/logout');
+        let endpoint = '/user/customer/logout';
+        if (userType === 'seller') {
+            endpoint = '/user/seller/logout';
+        } else if (userType === 'admin' || userType === 'super_admin') {
+            endpoint = '/user/admin/logout';
+        }
+        const res = await api.post(endpoint);
         return res.data;
     } catch (error) {
         return { success: false, message: error?.response?.data?.message || error.message };

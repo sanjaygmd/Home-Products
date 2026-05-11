@@ -118,6 +118,7 @@ const subtotal = items.reduce((acc, item) => {
           total={total}
           platformFee={platformFee}
           paymentMethod={paymentMethod}
+          appliedCoupon={appliedCoupon}
           onCouponApply={setAppliedCoupon}
         />
       </div>

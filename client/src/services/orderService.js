@@ -9,6 +9,15 @@ export const createOrder = async (orderData) => {
     }
 };
 
+export const createRazorpayOrder = async (amount) => {
+    try {
+        const response = await api.post(`/orders/razorpay/create-order`, { amount });
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : error;
+    }
+};
+
 export const getMyOrders = async (customerId) => {
     try {
         const response = await api.get(`/orders/customer/${customerId}`);

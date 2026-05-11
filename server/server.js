@@ -3,7 +3,7 @@ dotenv.config();
 
 // Critical Environment Validations
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
-const requiredEnvVars = ['JWT_SECRET', 'MASTER_SECURITY_KEY'];
+const requiredEnvVars = ['MASTER_SECURITY_KEY'];
 const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
 
 // Accept either DB_URL OR all discrete database configurations
@@ -78,12 +78,18 @@ app.use(cors({
             'http://localhost:5174',
             'http://127.0.0.1:5174'
         ];
-        // Only allow undefined origin (non-browser requests) in development
-        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || (origin === undefined && process.env.NODE_ENV === 'development');
+        
+        // Robust development check: allow any localhost port if port collides
+        const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        
+        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || 
+                          (origin === undefined && process.env.NODE_ENV === 'development') ||
+                          (isLocalhost && process.env.NODE_ENV === 'development');
         
         if (isAllowed) {
             callback(null, true);
         } else {
+            console.warn(`[CORS REJECTED] Blocked request from unauthorized origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
     },
@@ -194,8 +200,10 @@ app.listen(port, () => {
 })
 
 testDB()
-    .then(() => runSchemaMigrations()) // Run decoupled schema migrations
-    .then(() => pruneExpiredRecords()) // Safe, idempotent cleanup on startup
+    .then(() => runSchemaMigrations())          // Run decoupled schema migrations
+    .then(() => runSystemConfigMigration())     // Ensure system_config table & master_key column
+    .then(() => fixSellerConstraints())         // Ensure correct FK constraints on seller tables
+    .then(() => pruneExpiredRecords())          // Safe, idempotent cleanup on startup
     .catch((err) => {
         console.error('Database initialization error: ', err)
     })

@@ -88,18 +88,47 @@ export const sanitizeDescription = (html) => {
  * Enforces http/https, blocks private subnet IPs/localhost/link-local, and cleans unsafe characters.
  */
 export const isValidImageUrl = (urlStr) => {
-  if (!urlStr || typeof urlStr !== 'string') return false;
+  console.log('[DEBUG IMAGE VALIDATION] Checking image URL:', JSON.stringify(urlStr));
+  if (!urlStr || typeof urlStr !== 'string') {
+    console.log('[DEBUG IMAGE VALIDATION] Failed: null or not a string');
+    return false;
+  }
 
   try {
-    // Enforce basic character safety to block injection
+    // Basic character safety to block injection
     if (urlStr.includes('<') || urlStr.includes('>') || urlStr.includes('"') || urlStr.includes("'")) {
+      console.log('[DEBUG IMAGE VALIDATION] Failed: contains unsafe injection characters');
       return false;
+    }
+
+    // Securely allow base64 Data URIs for local image uploads
+    const isDataUri = urlStr.startsWith('data:image/');
+    if (isDataUri) {
+      // Regex enforces safe MIME types and standard base64 character set
+      const matchesData = /^data:image\/(jpeg|jpg|png|webp|gif|bmp);base64,[A-Za-z0-9+/=\s]+$/i.test(urlStr);
+      console.log('[DEBUG IMAGE VALIDATION] Data URI validation result:', matchesData);
+      return matchesData;
+    }
+
+    // Securely allow relative/local uploads paths (e.g. "Sanjay_Profile_Compressed.jpg" or "/uploads/pic.png")
+    const isRelativePath = !urlStr.startsWith('http://') && !urlStr.startsWith('https://') && !urlStr.includes('://');
+    if (isRelativePath) {
+      // Enforce strict security boundaries for local paths
+      if (urlStr.includes('..') || urlStr.includes('\\') || urlStr.includes(':')) {
+        console.log('[DEBUG IMAGE VALIDATION] Failed: relative path contains traversal or protocols');
+        return false; // Prevent path traversal and protocol bypasses
+      }
+      // Validate correct safe image extension
+      const matchesExt = /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(urlStr);
+      console.log('[DEBUG IMAGE VALIDATION] Relative path validation result:', matchesExt);
+      return matchesExt;
     }
 
     const parsed = new URL(urlStr);
 
     // Enforce allowed protocols
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.log('[DEBUG IMAGE VALIDATION] Failed: protocol is not http/https:', parsed.protocol);
       return false;
     }
 
@@ -117,11 +146,14 @@ export const isValidImageUrl = (urlStr) => {
     const isPrivateIpv6 = cleanHost.startsWith('fe80:') || cleanHost.startsWith('fc00:') || cleanHost.startsWith('fd00:') || cleanHost === '::';
 
     if (isLoopback || isPrivateIpv4 || isPrivateIpv6) {
+      console.log('[DEBUG IMAGE VALIDATION] Failed: Resolves to private/loopback IP address');
       return false;
     }
 
+    console.log('[DEBUG IMAGE VALIDATION] Success: Valid absolute image URL');
     return true;
   } catch (err) {
+    console.log('[DEBUG IMAGE VALIDATION] Failed with exception:', err.message);
     return false;
   }
 };

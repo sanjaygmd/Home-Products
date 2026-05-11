@@ -9,10 +9,10 @@ const OrderSummary = ({
   platformFee = 10,
   total = 0,
   paymentMethod = "razorpay",
+  appliedCoupon = null,   // controlled by parent (CheckoutPage)
   onCouponApply, // Callback to pass discount up
 }) => {
   const [couponCode, setCouponCode] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -24,11 +24,10 @@ const OrderSummary = ({
     setError("");
     const res = await validateCoupon(couponCode, subtotal);
     if (res.success) {
-      setAppliedCoupon(res.data);
       if (onCouponApply) onCouponApply(res.data);
     } else {
       setError(res.message);
-      setAppliedCoupon(null);
+      if (onCouponApply) onCouponApply(null);
     }
     setLoading(false);
   };
@@ -70,7 +69,7 @@ const OrderSummary = ({
           />
           {appliedCoupon ? (
             <button 
-                onClick={() => { setAppliedCoupon(null); setCouponCode(""); if (onCouponApply) onCouponApply(null); }}
+                onClick={() => { setCouponCode(""); if (onCouponApply) onCouponApply(null); }}
                 className="px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-50 rounded-xl transition-all"
             >
                 REMOVE

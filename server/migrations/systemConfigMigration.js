@@ -4,8 +4,19 @@ export const runMigration = async () => {
   try {
 
     
-    // 1. Drop system_config if it exists (as requested)
-    await pool.query(`DROP TABLE IF EXISTS system_config`);
+    // 1. Ensure system_config table exists with default commission_rate
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS system_config (
+            key VARCHAR(255) PRIMARY KEY,
+            value VARCHAR(255) NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    await pool.query(`
+        INSERT INTO system_config (key, value)
+        VALUES ('commission_rate', '0.10')
+        ON CONFLICT (key) DO NOTHING;
+    `);
 
     // 2. Add master_key column to super_admins if it doesn't exist
     // Note: ALTER TABLE doesn't support parameterized DEFAULT values directly.
