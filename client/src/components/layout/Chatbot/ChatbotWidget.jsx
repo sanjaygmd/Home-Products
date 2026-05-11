@@ -5,8 +5,10 @@ import {
     ChevronRight, Compass, ShieldCheck, MapPin, Award, ArrowRight
 } from 'lucide-react';
 import { sendChatbotMessage } from '../../../services/chatbotService';
+import { useAuth } from '../../../context/AuthContext';
 
 const ChatbotWidget = () => {
+    const { currentUser } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState('');
@@ -19,22 +21,38 @@ const ChatbotWidget = () => {
 
     const messagesEndRef = useRef(null);
 
-    // Load message history from local storage on mount
+    // Dynamic helper to get localStorage key based on logged-in user
+    const getStorageKey = () => {
+        return currentUser ? `gmd_home_chat_history_${currentUser.id}` : null;
+    };
+
+    // Load message history from local storage on mount or user change
     useEffect(() => {
-        const cachedMessages = localStorage.getItem('gmd_home_chat_history');
-        if (cachedMessages) {
-            setMessages(JSON.parse(cachedMessages));
+        const key = getStorageKey();
+        if (key) {
+            const cachedMessages = localStorage.getItem(key);
+            if (cachedMessages) {
+                setMessages(JSON.parse(cachedMessages));
+            } else {
+                // Initial welcoming message
+                const welcomeMsg = {
+                    role: 'model',
+                    text: "Hi there! 👋 I'm **GMD Home Assistant**, your personal interior design and shopping advisor. I can help you browse premium furniture, suggest kitchen & bedroom products, track your active orders, or answer delivery questions. How can I help elevate your space today?",
+                    timestamp: new Date().toISOString()
+                };
+                setMessages([welcomeMsg]);
+                localStorage.setItem(key, JSON.stringify([welcomeMsg]));
+            }
         } else {
-            // Initial welcoming message
+            // Guest users start with a clean welcoming message and no persistence
             const welcomeMsg = {
                 role: 'model',
                 text: "Hi there! 👋 I'm **GMD Home Assistant**, your personal interior design and shopping advisor. I can help you browse premium furniture, suggest kitchen & bedroom products, track your active orders, or answer delivery questions. How can I help elevate your space today?",
                 timestamp: new Date().toISOString()
             };
             setMessages([welcomeMsg]);
-            localStorage.setItem('gmd_home_chat_history', JSON.stringify([welcomeMsg]));
         }
-    }, []);
+    }, [currentUser]);
 
     // Auto-scroll messages container to bottom on new messages or loading state
     useEffect(() => {
@@ -45,7 +63,11 @@ const ChatbotWidget = () => {
     const saveMessages = (newMessages) => {
         const cappedMessages = newMessages.slice(-20);
         setMessages(cappedMessages);
-        localStorage.setItem('gmd_home_chat_history', JSON.stringify(cappedMessages));
+        
+        const key = getStorageKey();
+        if (key) {
+            localStorage.setItem(key, JSON.stringify(cappedMessages));
+        }
     };
 
     const handleSendMessage = async (textToSend) => {
