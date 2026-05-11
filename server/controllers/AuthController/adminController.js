@@ -1125,7 +1125,7 @@ export const getAnalyticsData = async (req, res) => {
 export const getAllPayments = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
     const countQuery = `SELECT COUNT(*) FROM orders WHERE is_deleted = false`;
@@ -1441,7 +1441,7 @@ export const resolveReturnRequest = async (req, res) => {
 export const getAllOrders = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
     const countQuery = `SELECT COUNT(*) FROM orders WHERE is_deleted = false`;
@@ -1506,7 +1506,7 @@ export const getAllOrders = async (req, res) => {
 export const getAllCustomers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
     const countQuery = `SELECT COUNT(*) FROM customers WHERE deleted_at IS NULL`;

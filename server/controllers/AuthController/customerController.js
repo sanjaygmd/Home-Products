@@ -532,7 +532,9 @@ export const logoutCustomer = async (req, res) => {
 export const sendOTP = async (req, res) => {
   try {
     const { email, purpose, user_type } = req.body;
-    const type = user_type || 'customer';
+    
+    const allowedUserTypes = ['customer', 'seller'];
+    const type = (user_type && allowedUserTypes.includes(user_type)) ? user_type : 'customer';
 
     if (!email) {
       return res.status(400).json({ success: false, message: "Email is required" });
@@ -572,7 +574,9 @@ export const sendOTP = async (req, res) => {
 export const verifyOTP = async (req, res) => {
   try {
     const { email, otp, purpose, user_type } = req.body;
-    const type = user_type || 'customer';
+    
+    const allowedUserTypes = ['customer', 'seller'];
+    const type = (user_type && allowedUserTypes.includes(user_type)) ? user_type : 'customer';
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required" });

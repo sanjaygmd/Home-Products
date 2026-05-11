@@ -722,6 +722,15 @@ export const searchProducts = async (req, res) => {
             return res.status(400).json({ success: false, message: "Search query is required" });
         }
 
+        // Security Guard: Cap query length to 100 characters
+        if (q.length > 100) {
+            return res.status(400).json({ success: false, message: "Search query must not exceed 100 characters" });
+        }
+
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+        const offset = (page - 1) * limit;
+
         const queryText = `
             SELECT p.*, 
             COALESCE((SELECT AVG(rating)::numeric(10,1) FROM reviews WHERE product_id = p.product_id AND variant_id IS NULL), 0) as rating,
@@ -732,12 +741,17 @@ export const searchProducts = async (req, res) => {
             WHERE p.is_active = true 
             AND (p.name ILIKE $1 OR p.description ILIKE $1 OR p.brand ILIKE $1)
             ORDER BY p.created_at DESC
+            LIMIT $2 OFFSET $3
         `;
-        const result = await pool.query(queryText, [`%${q}%`]);
+        const result = await pool.query(queryText, [`%${q}%`, limit, offset]);
 
         return res.status(200).json({
             success: true,
-            data: result.rows
+            data: result.rows,
+            pagination: {
+                page,
+                limit
+            }
         });
     } catch (error) {
         console.error("SEARCH PRODUCTS ERROR:", error);
