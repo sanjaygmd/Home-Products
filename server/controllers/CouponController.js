@@ -136,6 +136,20 @@ export const createCoupon = async (req, res) => {
             }
         }
 
+        if (discount_percent !== undefined && discount_percent !== null) {
+            const dp = parseFloat(discount_percent);
+            if (isNaN(dp) || dp < 0 || dp > 100) {
+                return res.status(400).json({ success: false, message: "Discount percent must be a valid number between 0 and 100." });
+            }
+        }
+
+        if (discount_amount !== undefined && discount_amount !== null) {
+            const da = parseFloat(discount_amount);
+            if (isNaN(da) || da < 0) {
+                return res.status(400).json({ success: false, message: "Discount amount must be a valid non-negative number." });
+            }
+        }
+
         const result = await pool.query(
             `INSERT INTO coupons (coupon_id, code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)
              VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
@@ -184,6 +198,20 @@ export const updateCoupon = async (req, res) => {
             const allowedTypes = ['percentage', 'fixed'];
             if (!allowedTypes.includes(type)) {
                 return res.status(400).json({ success: false, message: "Coupon type must be either 'percentage' or 'fixed'" });
+            }
+        }
+
+        if (discount_percent !== undefined && discount_percent !== null) {
+            const dp = parseFloat(discount_percent);
+            if (isNaN(dp) || dp < 0 || dp > 100) {
+                return res.status(400).json({ success: false, message: "Discount percent must be a valid number between 0 and 100." });
+            }
+        }
+
+        if (discount_amount !== undefined && discount_amount !== null) {
+            const da = parseFloat(discount_amount);
+            if (isNaN(da) || da < 0) {
+                return res.status(400).json({ success: false, message: "Discount amount must be a valid non-negative number." });
             }
         }
 

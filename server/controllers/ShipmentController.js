@@ -349,10 +349,7 @@ export const syncTracking = async (req, res) => {
  * Handle incoming webhooks from Shiprocket
  */
 export const handleShiprocketWebhook = async (req, res) => {
-    // Shiprocket expects a 200 OK fast.
-    res.status(200).send('OK');
-
-    // 1. Verify Webhook Token (Security Guard)
+    // 1. Verify Webhook Token (Security Guard) FIRST before responding or processing
     const token = req.headers['x-api-key'] || req.query.token;
     const expectedToken = process.env.SHIPROCKET_WEBHOOK_TOKEN;
     
@@ -360,6 +357,9 @@ export const handleShiprocketWebhook = async (req, res) => {
         console.warn("[WEBHOOK] Unauthorized access attempt detected.");
         return res.status(401).send('Unauthorized');
     }
+
+    // Shiprocket expects a 200 OK fast.
+    res.status(200).send('OK');
 
     const payload = req.body;
     if (!payload || !payload.awb) return;

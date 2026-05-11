@@ -3,6 +3,7 @@ import { pushOrderToShiprocket, cancelShipment } from './ShipmentController.js';
 import { sendOrderConfirmationEmail } from '../utils/email.js';
 import { processAutoPayout } from './PayoutController.js';
 import crypto from 'crypto';
+import { sanitizeText } from '../utils/sanitizer.js';
 
 export const createOrder = async (req, res) => {
   const client = await pool.connect();
@@ -59,16 +60,67 @@ export const createOrder = async (req, res) => {
       });
     }
 
+    if (!address_details) {
+      return res.status(400).json({ success: false, message: "Delivery address details are required." });
+    }
+
+    let address_id = address_details.address_id;
+    let sanitizedAddressDetails = {};
+
+    if (!address_id) {
+      const { name, phone, address, city, state, pincode } = address_details;
+
+      if (!name || !phone || !address || !city || !state || !pincode) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "All address fields (name, phone, address, city, state, pincode) are required for delivery." 
+        });
+      }
+
+      // Validate phone is exactly 10-15 digits
+      const cleanedPhone = phone.replace(/\D/g, '');
+      if (cleanedPhone.length < 10 || cleanedPhone.length > 15) {
+        return res.status(400).json({ success: false, message: "Please provide a valid phone number (10 to 15 digits)." });
+      }
+
+      // Validate pincode is a valid format (6 digits)
+      const cleanedPincode = pincode.replace(/\s/g, '');
+      if (!/^\d{6}$/.test(cleanedPincode)) {
+        return res.status(400).json({ success: false, message: "Please provide a valid 6-digit PIN code." });
+      }
+
+      // Sanitize fields to prevent XSS
+      sanitizedAddressDetails = {
+        name: sanitizeText(name),
+        phone: cleanedPhone,
+        address: sanitizeText(address),
+        city: sanitizeText(city),
+        state: sanitizeText(state),
+        pincode: cleanedPincode
+      };
+
+      if (!sanitizedAddressDetails.name || !sanitizedAddressDetails.address || !sanitizedAddressDetails.city || !sanitizedAddressDetails.state) {
+        return res.status(400).json({ success: false, message: "Invalid or unsafe characters detected in the delivery address." });
+      }
+    }
+
     await client.query('BEGIN');
 
     // 1. Get or Create Address ID
-    let address_id = address_details.address_id;
     if (!address_id) {
       const addrRes = await client.query(
         `INSERT INTO addresses (address_id, customer_id, full_name, phone, address_line_1, city, state, pincode, is_default)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, false)
          RETURNING address_id`,
-        [customer_id, address_details.name, address_details.phone, address_details.address, address_details.city, address_details.state, address_details.pincode]
+        [
+          customer_id, 
+          sanitizedAddressDetails.name, 
+          sanitizedAddressDetails.phone, 
+          sanitizedAddressDetails.address, 
+          sanitizedAddressDetails.city, 
+          sanitizedAddressDetails.state, 
+          sanitizedAddressDetails.pincode
+        ]
       );
       address_id = addrRes.rows[0].address_id;
     }
