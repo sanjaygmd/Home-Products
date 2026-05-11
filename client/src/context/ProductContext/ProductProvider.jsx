@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useContext } from "react"
-export { ProductContext } from "./ProductContext";
 import { ProductContext } from "./ProductContext";
+export { ProductContext };
 import * as productService from "../../services/productService";
 
 export const ProductProvider = ({ children }) => {
@@ -89,7 +89,7 @@ export const ProductProvider = ({ children }) => {
                                 variant_value: v.variant_value,
                                 price: vPrice,
                                 discountPrice: vPrice,
-                                discountPercent: 0, // Remove discount from variants
+                                discountPercent: vDiscountPercent,
                                 stock: Number(v.stock_quantity) || 0,
                                 thumbnail: variantImg ? variantImg.image_url : base.thumbnail,
                                 slug: `${base.slug}?v=${v.variant_id}`
@@ -119,6 +119,10 @@ export const ProductProvider = ({ children }) => {
             p.variants.forEach(v => {
                 const variantImg = base.rawImages.find(img => img.variant_id === v.variant_id);
                 const vPrice = Number(v.price) || base.price;
+                const vMrp = base.basePrice || vPrice;
+                const vDiscountPercent = (vMrp > 0 && vMrp > vPrice) 
+                    ? Math.round(((vMrp - vPrice) / vMrp) * 100) 
+                    : 0;
                 family.push({
                     ...base,
                     id: `${p.product_id}-${v.variant_id}`,
@@ -129,7 +133,7 @@ export const ProductProvider = ({ children }) => {
                     variant_value: v.variant_value,
                     price: vPrice,
                     discountPrice: vPrice,
-                    discountPercent: 0, // Remove discount from variants
+                    discountPercent: vDiscountPercent,
                     stock: Number(v.stock_quantity) || 0,
                     thumbnail: variantImg ? variantImg.image_url : base.thumbnail,
                     slug: `${base.slug}?v=${v.variant_id}`
@@ -222,7 +226,7 @@ export const ProductProvider = ({ children }) => {
                                 variant_value: v.variant_value,
                                 price: vPrice,
                                 discountPrice: vPrice,
-                                discountPercent: 0, // Remove discount from variants
+                                discountPercent: vDiscountPercent,
                                 stock: Number(v.stock_quantity) || 0,
                                 thumbnail: variantImg ? variantImg.image_url : base.thumbnail,
                                 slug: `${base.slug}?v=${v.variant_id}`

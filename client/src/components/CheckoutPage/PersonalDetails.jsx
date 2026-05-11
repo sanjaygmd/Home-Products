@@ -16,6 +16,7 @@ const PersonalDetails = ({ onNext }) => {
   });
 
   const [addresses, setAddresses] = useState([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (currentUser?.id) {
@@ -46,8 +47,38 @@ const PersonalDetails = ({ onNext }) => {
     }
   }, [currentUser]);
 
-  const handleChange = (e) =>
+  const handleChange = (e) => {
+    setError("");
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = () => {
+    setError("");
+    const { name, phone, email, address, city, pincode, state } = form;
+    if (!name || !phone || !email || !address || !city || !pincode || !state) {
+      setError("All fields are required. Please fill in the complete shipping details.");
+      return;
+    }
+    
+    const cleanedPhone = phone.replace(/\D/g, '');
+    if (cleanedPhone.length < 10 || cleanedPhone.length > 15) {
+      setError("Please provide a valid phone number (10 to 15 digits).");
+      return;
+    }
+
+    const cleanedPincode = pincode.replace(/\s/g, '');
+    if (!/^\d{6}$/.test(cleanedPincode)) {
+      setError("Please provide a valid 6-digit PIN code.");
+      return;
+    }
+
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      setError("Please provide a valid email address.");
+      return;
+    }
+
+    onNext(form);
+  };
 
   return (
     <div className={`${card} p-6 space-y-6`}>
@@ -74,8 +105,14 @@ const PersonalDetails = ({ onNext }) => {
 
       </div>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-xs font-bold animate-pulse">
+          ⚠️ {error}
+        </div>
+      )}
+
       <button
-        onClick={() => onNext(form)}
+        onClick={handleSubmit}
         className={`${buttonPrimary} w-full`}
       >
         Continue to Payment →

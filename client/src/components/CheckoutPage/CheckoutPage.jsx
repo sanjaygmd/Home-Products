@@ -37,18 +37,18 @@ const subtotal = items.reduce((acc, item) => {
 }, 0);
 
 
-  const delivery = subtotal > 1000 ? 0 : 40;
+  const delivery = subtotal > 5000 ? 0 : 150;
   const gst = Math.round(subtotal * 0.05);
   const codFee = paymentMethod === "cod" ? 50 : 0;
   const platformFee = 10;
   
   const discountAmount = appliedCoupon 
-    ? (appliedCoupon.type === 'flat' || appliedCoupon.type === 'fixed' || parseFloat(appliedCoupon.discount_amount || 0) > 0)
-      ? parseFloat(appliedCoupon.discount_amount)
-      : Math.min(
-          (subtotal * (appliedCoupon.discount_percent || 0)) / 100, 
-          appliedCoupon.max_discount || Infinity
+    ? (appliedCoupon.type === 'percentage')
+      ? Math.min(
+          (subtotal * parseFloat(appliedCoupon.discount_percent || 0)) / 100, 
+          parseFloat(appliedCoupon.max_discount || Infinity)
         ) 
+      : parseFloat(appliedCoupon.discount_amount || 0)
     : 0;
 
   const total = subtotal + delivery + gst + codFee + platformFee - discountAmount;

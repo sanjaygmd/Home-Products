@@ -22,7 +22,7 @@ const G = {
 
 export default function AdminAuthPage() {
   const navigate = useNavigate();
-  const { loginUser } = useAuth();
+  const { loginAdmin } = useAuth();
   const { toast } = useToast();
   
   const [isLogin, setIsLogin] = useState(true);
@@ -249,7 +249,7 @@ export default function AdminAuthPage() {
           setLoginEmail(resData.email);
           setShow2FA(true);
         } else {
-          loginUser(resData.data);
+          loginAdmin(resData.data);
           toast({ title: successMsg, description: isLogin ? `Accessing your ${formData.type === 'super_admin' ? 'Super Admin' : 'Admin'} dashboard...` : "Your account is ready." });
           navigate("/admin");
         }
@@ -270,7 +270,7 @@ export default function AdminAuthPage() {
       const resData = await verifySuperAdminLogin({ email: loginEmail, otp: loginOtp });
       
       if (resData.success) {
-        loginUser(resData.data);
+        loginAdmin(resData.data);
         toast({ title: "Welcome Super Admin!", description: "Accessing elevated dashboard..." });
         setShow2FA(false);
         navigate("/admin");

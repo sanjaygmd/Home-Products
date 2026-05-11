@@ -43,12 +43,27 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('auth');
   };
 
+  const loginAdmin = (adminData) => {
+    const { token, ...adminWithoutToken } = adminData;
+    const role = adminData.role || 'admin';
+    const formattedAdmin = { ...adminWithoutToken, role };
+    setCurrentUser(formattedAdmin);
+    localStorage.setItem('admin', JSON.stringify(formattedAdmin));
+    localStorage.removeItem('user'); // Isolate contexts
+    localStorage.removeItem('seller');
+    localStorage.removeItem('auth');
+  };
+
   const logoutUser = async () => {
     try {
       await authServiceLogout();
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
+      if (currentUser?.id) {
+        localStorage.removeItem(`gmd_home_chat_history_${currentUser.id}`);
+      }
+      localStorage.removeItem('gmd_home_chat_history');
       setCurrentUser(null);
       // Aggressively clear all possible auth-related local storage items
       localStorage.removeItem('user');
@@ -60,7 +75,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ currentUser, loginUser, loginSeller, logoutUser, loading }}>
+    <AuthContext.Provider value={{ currentUser, loginUser, loginSeller, loginAdmin, logoutUser, loading }}>
       {!loading && children}
     </AuthContext.Provider>
   );

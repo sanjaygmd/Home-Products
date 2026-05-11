@@ -5,6 +5,7 @@ const OrderPlaced = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const orderId = location.state?.orderId || "ORD" + Math.floor(Math.random() * 100000);
+  const paymentMethod = location.state?.paymentMethod || "online";
 
   const [animate, setAnimate] = useState(false);
 
@@ -67,7 +68,7 @@ const OrderPlaced = () => {
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Payment</span>
             <span className="font-medium text-gray-800">
-              Paid Online
+              {paymentMethod === "cod" ? "Cash on Delivery" : "Paid Online"}
             </span>
           </div>
         </div>

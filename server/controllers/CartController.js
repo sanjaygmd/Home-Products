@@ -157,12 +157,12 @@ export const addToCart = async (req, res) => {
             throw new Error("Quantity in cart cannot exceed 100 units per item.");
         }
 
-        // Fetch stock of product / variant
+        // Fetch stock of product / variant with FOR UPDATE lock
         let stockQuantity = 0;
         let productName = '';
         if (variant_id) {
             const vStock = await client.query(
-                "SELECT pv.stock_quantity, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 AND pv.product_id = $2",
+                "SELECT pv.stock_quantity, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 AND pv.product_id = $2 FOR UPDATE",
                 [variant_id, product_id]
             );
             if (vStock.rows.length > 0) {
@@ -170,7 +170,7 @@ export const addToCart = async (req, res) => {
                 productName = vStock.rows[0].name;
             }
         } else {
-            const pStock = await client.query("SELECT stock_quantity, name FROM products WHERE product_id = $1", [product_id]);
+            const pStock = await client.query("SELECT stock_quantity, name FROM products WHERE product_id = $1 FOR UPDATE", [product_id]);
             if (pStock.rows.length > 0) {
                 stockQuantity = pStock.rows[0].stock_quantity;
                 productName = pStock.rows[0].name;
@@ -289,38 +289,52 @@ export const updateCartItem = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Quantity cannot exceed 100 units per item.' });
         }
 
+        await client.query('BEGIN');
+
         let dbPrice = 0;
         if (!isNaN(qty) && qty > 0) {
-            // Fetch actual stock and price
-            const stockCheck = await client.query(
-                `SELECT 
-                    ci.product_id, 
-                    ci.variant_id,
-                    p.name AS product_name,
-                    COALESCE(pv.stock_quantity, p.stock_quantity) AS stock_quantity,
-                    COALESCE(pv.price, p.price) AS current_price
-                 FROM cart_items ci
-                 JOIN products p ON ci.product_id = p.product_id
-                 LEFT JOIN product_variants pv ON ci.variant_id = pv.variant_id
-                 WHERE ci.cart_item_id = $1`,
+            // Fetch product_id and variant_id for this cart_item first
+            const itemDetails = await client.query(
+                "SELECT product_id, variant_id FROM cart_items WHERE cart_item_id = $1",
                 [cart_item_id]
             );
+            if (itemDetails.rows.length === 0) {
+                throw new Error("Cart item not found");
+            }
+            const { product_id, variant_id } = itemDetails.rows[0];
 
-            if (stockCheck.rows.length === 0) {
-                return res.status(404).json({ success: false, message: 'Cart item or associated product not found.' });
+            let stockQuantity = 0;
+            let productName = '';
+            let currentPrice = 0;
+
+            if (variant_id) {
+                const vStock = await client.query(
+                    "SELECT pv.stock_quantity, p.name, pv.price FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 AND pv.product_id = $2 FOR UPDATE",
+                    [variant_id, product_id]
+                );
+                if (vStock.rows.length > 0) {
+                    stockQuantity = vStock.rows[0].stock_quantity;
+                    productName = vStock.rows[0].name;
+                    currentPrice = vStock.rows[0].price;
+                } else {
+                    throw new Error("Product variant not found");
+                }
+            } else {
+                const pStock = await client.query("SELECT stock_quantity, name, price FROM products WHERE product_id = $1 FOR UPDATE", [product_id]);
+                if (pStock.rows.length > 0) {
+                    stockQuantity = pStock.rows[0].stock_quantity;
+                    productName = pStock.rows[0].name;
+                    currentPrice = pStock.rows[0].price;
+                } else {
+                    throw new Error("Product not found");
+                }
             }
 
-            const { stock_quantity, product_name, current_price } = stockCheck.rows[0];
-            if (qty > stock_quantity) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `Cannot update quantity to ${qty}. Only ${stock_quantity} units of '${product_name}' are currently in stock.` 
-                });
+            if (qty > stockQuantity) {
+                throw new Error(`Cannot update quantity to ${qty}. Only ${stockQuantity} units of '${productName}' are currently in stock.`);
             }
-            dbPrice = parseFloat(current_price);
+            dbPrice = parseFloat(currentPrice);
         }
-
-        await client.query('BEGIN');
 
         let result;
         if (quantity <= 0) {
@@ -346,7 +360,11 @@ export const updateCartItem = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('UPDATE CART ITEM ERROR:', error);
-        return res.status(500).json({ success: false, message: 'Error updating cart item' });
+        const isValidationError = error.message.includes('stock') || error.message.includes('not found') || error.message.includes('Quantity');
+        return res.status(isValidationError ? 400 : 500).json({ 
+            success: false, 
+            message: error.message || 'Error updating cart item' 
+        });
     } finally {
         client.release();
     }

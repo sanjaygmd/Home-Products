@@ -19,9 +19,9 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
 
   const subtotalValue = items.reduce((acc, item) => acc + (item.discountPrice || item.price) * (item.quantity || 1), 0);
   const discountValue = appliedCoupon
-    ? (appliedCoupon.type === 'flat' || appliedCoupon.type === 'fixed' || parseFloat(appliedCoupon.discount_amount || 0) > 0)
-      ? parseFloat(appliedCoupon.discount_amount)
-      : Math.min((subtotalValue * (appliedCoupon.discount_percent || 0)) / 100, appliedCoupon.max_discount || Infinity)
+    ? (appliedCoupon.type === 'percentage')
+      ? Math.min((subtotalValue * parseFloat(appliedCoupon.discount_percent || 0)) / 100, parseFloat(appliedCoupon.max_discount || Infinity))
+      : parseFloat(appliedCoupon.discount_amount || 0)
     : 0;
 
 
@@ -67,7 +67,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
           } catch (cleanupErr) {
             console.error("Cleanup error after COD success:", cleanupErr);
           }
-          navigate("/order-success", { state: { orderId: response.order_id } });
+          navigate("/order-success", { state: { orderId: response.order_id, paymentMethod: "cod" } });
         } else {
           setError(response.message || "Failed to place order. Please try again.");
         }
@@ -78,12 +78,14 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
           currency: "INR",
           name: "GMD Marketplace",
           description: "Order Payment",
-
+ 
           handler: async function (response) {
             try {
               const dbResponse = await createOrder({
                 ...orderData,
-                payment_id: response.razorpay_payment_id
+                payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature
               });
               if (dbResponse.success) {
                 try {
@@ -92,7 +94,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
                 } catch (cleanupErr) {
                   console.error("Cleanup error after order success:", cleanupErr);
                 }
-                navigate("/order-success", { state: { orderId: dbResponse.order_id } });
+                navigate("/order-success", { state: { orderId: dbResponse.order_id, paymentMethod: "online" } });
               } else {
                 setError(dbResponse.message || "Payment recorded but order registration failed. Contact support.");
               }

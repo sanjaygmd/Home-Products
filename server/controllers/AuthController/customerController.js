@@ -465,8 +465,8 @@ export const getMe = async (req, res) => {
     const userTypes = {
       customer: { table: 'customers', id: 'customer_id', fields: 'full_name as name, email, phone, date_of_birth, gender, profile_picture_url, is_active, created_at' },
       seller: { table: 'sellers', id: 'seller_id', fields: 'full_name as name, email, phone, store_name, gstin, store_logo_url, store_description, is_verified, is_active, created_at' },
-      admin: { table: 'admins', id: 'admin_id', fields: 'name, email, role, is_active, created_at' },
-      super_admin: { table: 'super_admins', id: 'super_admin_id', fields: 'name, email, role, is_active, created_at' }
+      admin: { table: 'admins', id: 'admin_id', fields: 'name, email, is_active, created_at' },
+      super_admin: { table: 'super_admins', id: 'super_admin_id', fields: 'name, email, is_active, created_at' }
     };
 
     const config = userTypes[req.user.type];
