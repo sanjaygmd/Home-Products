@@ -711,6 +711,15 @@ export const createReturnRequest = async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing required fields for return request." });
         }
 
+        // Whitelist return_type strictly to ['Refund', 'Replacement']
+        const allowedReturnTypes = ['Refund', 'Replacement'];
+        if (!allowedReturnTypes.includes(return_type)) {
+            return res.status(400).json({ success: false, message: "Invalid return type. Must be Refund or Replacement." });
+        }
+
+        // Sanitize user-provided reason to prevent stored XSS
+        const sanitizedReason = sanitizeText(reason);
+
         await client.query('BEGIN');
 
         // Check if return request already exists
@@ -753,14 +762,14 @@ export const createReturnRequest = async (req, res) => {
         const { unit_price, quantity } = itemCheck.rows[0];
         const refund_amount = unit_price * quantity;
 
-        // 3. Insert into return_requests
+        // 3. Insert into return_requests with sanitized reason
         const returnRes = await client.query(
             `INSERT INTO return_requests (
                 return_request_id, order_id, order_item_id, customer_id, 
                 reason, return_type, refund_amount, refund_status, requested_at
             ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'Pending', NOW())
             RETURNING return_request_id`,
-            [order_id, order_item_id, customer_id, reason, return_type, refund_amount]
+            [order_id, order_item_id, customer_id, sanitizedReason, return_type, refund_amount]
         );
         const return_request_id = returnRes.rows[0].return_request_id;
 

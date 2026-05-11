@@ -88,6 +88,20 @@ export const runSchemaMigrations = async () => {
       }
     }
 
+    // 9. Ensure chatbot history table exists for secure server-side conversation history tracking
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS chatbot_history (
+            id UUID PRIMARY KEY,
+            session_id VARCHAR(255) NOT NULL,
+            role VARCHAR(50) NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_chatbot_history_session_id ON chatbot_history(session_id);
+    `);
+
     console.log("[MIGRATOR] All schema migrations ran successfully.");
   } catch (err) {
     console.error("[MIGRATOR] Schema migrations FAILED:", err.message);

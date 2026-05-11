@@ -1,4 +1,5 @@
 import { pool } from '../configs/db.js';
+import crypto from 'crypto';
 
 // Dynamic Gemini Client Loader to prevent startup crashes if package is missing or API key is absent
 let genAI = null;
@@ -32,6 +33,23 @@ export const handleChatMessage = async (req, res, next) => {
 
         if (message.trim().length > 500) {
             return res.status(400).json({ success: false, message: "Message exceeds maximum length of 500 characters." });
+        }
+
+        let sessionId = req.user ? req.user.id : req.cookies?.guest_session_id;
+        let isNewGuestSession = false;
+        if (!sessionId) {
+            sessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+            isNewGuestSession = true;
+        }
+
+        if (isNewGuestSession) {
+            res.cookie('guest_session_id', sessionId, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                maxAge: 24 * 60 * 60 * 1000, // 1 day
+                sameSite: 'lax',
+                path: '/'
+            });
         }
 
         // 1. Fetch Store Context from PostgreSQL Database with defensive try/catch blocks
@@ -163,11 +181,25 @@ ${userContextString}
             });
         }
 
-        // Map conversational history into Gemini's format: { role: 'user' | 'model', parts: [{ text: string }] }
-        let formattedHistory = history.slice(-10).map(msg => ({
-            role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content || msg.text || "" }]
-        }));
+        let formattedHistory = [];
+        // Secure Server-Side History Rebuild: completely ignore client-supplied message content to prevent prompt injection.
+        if (!history || history.length <= 1) {
+            // Client indicates chat cleared or new conversation. Purge old DB records.
+            await pool.query(
+                "DELETE FROM chatbot_history WHERE session_id = $1",
+                [sessionId]
+            );
+        } else {
+            // Reconstruct history securely from PostgreSQL
+            const dbHistory = await pool.query(
+                "SELECT role, content FROM chatbot_history WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10",
+                [sessionId]
+            );
+            formattedHistory = dbHistory.rows.reverse().map(msg => ({
+                role: msg.role === 'user' ? 'user' : 'model',
+                parts: [{ text: msg.content || "" }]
+            }));
+        }
 
         // Gemini's startChat API strictly requires the first message to be from the 'user'.
         while (formattedHistory.length > 0 && formattedHistory[0].role === 'model') {
@@ -200,6 +232,17 @@ ${userContextString}
                 
                 replyText = result.response.text();
                 console.log(`[CHATBOT SUCCESS] Message processed successfully using model: ${modelName}`);
+
+                // Save both user prompt and AI response to the secure database history
+                await pool.query(
+                    "INSERT INTO chatbot_history (id, session_id, role, content) VALUES (gen_random_uuid(), $1, 'user', $2)",
+                    [sessionId, message.trim()]
+                );
+                await pool.query(
+                    "INSERT INTO chatbot_history (id, session_id, role, content) VALUES (gen_random_uuid(), $1, 'model', $2)",
+                    [sessionId, replyText]
+                );
+
                 lastError = null;
                 break; // Break loop on successful generation!
             } catch (err) {
