@@ -28,10 +28,26 @@ export const addProduct = async (req, res) => {
         } = req.body;
 
         const cleanName = sanitizeText(name);
-        if (!cleanName || !price || !category_id) {
+        if (!cleanName || price === undefined || price === null || !category_id) {
             return res.status(400).json({
                 success: false,
                 message: "Required fields missing (name, price, category_id)"
+            });
+        }
+
+        const parsedPrice = parseFloat(price);
+        if (isNaN(parsedPrice) || parsedPrice < 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Product price must be a valid non-negative number."
+            });
+        }
+
+        const parsedStock = parseInt(stock_quantity === undefined || stock_quantity === null ? 0 : stock_quantity, 10);
+        if (isNaN(parsedStock) || parsedStock < 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Product stock quantity must be a valid non-negative integer."
             });
         }
 
@@ -95,6 +111,24 @@ export const addProduct = async (req, res) => {
             const variantMap = {};
             if (variants && variants.length > 0) {
                 for (const variant of variants) {
+                    if (variant.price !== undefined && variant.price !== null) {
+                        const vp = parseFloat(variant.price);
+                        if (isNaN(vp) || vp < 0) {
+                            await client.query('ROLLBACK');
+                            client.release();
+                            return res.status(400).json({ success: false, message: "Variant price must be a valid non-negative number." });
+                        }
+                    }
+                    const vStockRaw = (variant.stock !== undefined && variant.stock !== null) ? variant.stock : variant.stock_quantity;
+                    if (vStockRaw !== undefined && vStockRaw !== null) {
+                        const vs = parseInt(vStockRaw, 10);
+                        if (isNaN(vs) || vs < 0) {
+                            await client.query('ROLLBACK');
+                            client.release();
+                            return res.status(400).json({ success: false, message: "Variant stock quantity must be a valid non-negative integer." });
+                        }
+                    }
+
                     const variantSku = variant.sku || `${product.sku}-var-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
                     const vRes = await client.query(
                         `INSERT INTO product_variants (variant_id, product_id, sku, variant_name, variant_value, price, stock_quantity, weight, name) 
@@ -339,6 +373,26 @@ export const updateProduct = async (req, res) => {
         images
     } = req.body;
 
+    if (price !== undefined && price !== null) {
+        const parsedPrice = parseFloat(price);
+        if (isNaN(parsedPrice) || parsedPrice < 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Product price must be a valid non-negative number."
+            });
+        }
+    }
+
+    if (stock_quantity !== undefined && stock_quantity !== null) {
+        const parsedStock = parseInt(stock_quantity, 10);
+        if (isNaN(parsedStock) || parsedStock < 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Product stock quantity must be a valid non-negative integer."
+            });
+        }
+    }
+
     // Validate image URLs to prevent SSRF and Content-Injection
     if (images && Array.isArray(images)) {
         for (const img of images) {
@@ -430,6 +484,24 @@ export const updateProduct = async (req, res) => {
 
             // A. Handle existing/updated variants and inserts
             for (const v of variants) {
+                if (v.price !== undefined && v.price !== null) {
+                    const vp = parseFloat(v.price);
+                    if (isNaN(vp) || vp < 0) {
+                        await client.query('ROLLBACK');
+                        client.release();
+                        return res.status(400).json({ success: false, message: "Variant price must be a valid non-negative number." });
+                    }
+                }
+                const vStockRaw = (v.stock_quantity !== undefined && v.stock_quantity !== null) ? v.stock_quantity : v.stock;
+                if (vStockRaw !== undefined && vStockRaw !== null) {
+                    const vs = parseInt(vStockRaw, 10);
+                    if (isNaN(vs) || vs < 0) {
+                        await client.query('ROLLBACK');
+                        client.release();
+                        return res.status(400).json({ success: false, message: "Variant stock quantity must be a valid non-negative integer." });
+                    }
+                }
+
                 const vid = (v.variant_id || v.id || v.tempId);
                 const isNew = !vid || String(vid).startsWith('v_');
                 const variantSku = v.sku || `${cleanSku || result.rows[0].sku}-var-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
@@ -558,6 +630,20 @@ export const updateVariant = async (req, res) => {
         variant_name, variant_value, price, stock_quantity, sku, weight,
         name, description, brand, category_id, room
     } = body;
+
+    if (price !== undefined && price !== null && price !== "") {
+        const parsedPrice = parseFloat(price);
+        if (isNaN(parsedPrice) || parsedPrice < 0) {
+            return res.status(400).json({ success: false, message: "Variant price must be a valid non-negative number." });
+        }
+    }
+
+    if (stock_quantity !== undefined && stock_quantity !== null && stock_quantity !== "") {
+        const parsedStock = parseInt(stock_quantity, 10);
+        if (isNaN(parsedStock) || parsedStock < 0) {
+            return res.status(400).json({ success: false, message: "Variant stock quantity must be a valid non-negative integer." });
+        }
+    }
 
     const client = await pool.connect();
     try {

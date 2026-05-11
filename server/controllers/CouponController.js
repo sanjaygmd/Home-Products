@@ -129,6 +129,13 @@ export const createCoupon = async (req, res) => {
             return res.status(400).json({ success: false, message: "Coupon code must be 3-30 characters long and contain only uppercase letters, numbers, and hyphens" });
         }
 
+        if (type !== undefined && type !== null) {
+            const allowedTypes = ['percentage', 'fixed'];
+            if (!allowedTypes.includes(type)) {
+                return res.status(400).json({ success: false, message: "Coupon type must be either 'percentage' or 'fixed'" });
+            }
+        }
+
         const result = await pool.query(
             `INSERT INTO coupons (coupon_id, code, type, discount_percent, discount_amount, max_discount, min_order_value, valid_until, max_usage, is_active, admin_id, created_at)
              VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
@@ -170,6 +177,13 @@ export const updateCoupon = async (req, res) => {
             const couponRegex = /^[A-Z0-9\-]{3,30}$/;
             if (!couponRegex.test(cleanCode)) {
                 return res.status(400).json({ success: false, message: "Coupon code must be 3-30 characters long and contain only uppercase letters, numbers, and hyphens" });
+            }
+        }
+
+        if (type !== undefined && type !== null) {
+            const allowedTypes = ['percentage', 'fixed'];
+            if (!allowedTypes.includes(type)) {
+                return res.status(400).json({ success: false, message: "Coupon type must be either 'percentage' or 'fixed'" });
             }
         }
 

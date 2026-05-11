@@ -1,4 +1,5 @@
 import { pool } from '../configs/db.js';
+import { sanitizeText, sanitizeDescription } from '../utils/sanitizer.js';
 
 // Get all reviews with product and customer details (Admin)
 export const getAllReviews = async (req, res) => {
@@ -86,6 +87,16 @@ export const addReview = async (req, res) => {
     const { product_id, order_item_id, rating, title, body, variant_id } = req.body;
     const customer_id = req.user.id; // From verifyToken middleware
 
+    // Parse and validate rating: integer between 1 and 5
+    const parsedRating = parseInt(rating, 10);
+    if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+        return res.status(400).json({ success: false, message: "Rating must be an integer between 1 and 5." });
+    }
+
+    // Sanitize input to prevent XSS
+    const sanitizedTitle = sanitizeText(title);
+    const sanitizedBody = sanitizeDescription(body);
+
     try {
         // Security Fix: Check if customer has a verified purchase for this product
         const purchaseCheck = await pool.query(
@@ -121,7 +132,7 @@ export const addReview = async (req, res) => {
             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW(), $7)
             RETURNING *
         `;
-        const result = await pool.query(query, [product_id, customer_id, order_item_id, rating, title, body, variant_id || null]);
+        const result = await pool.query(query, [product_id, customer_id, order_item_id, parsedRating, sanitizedTitle, sanitizedBody, variant_id || null]);
         
         res.status(201).json({ success: true, message: "Review submitted successfully", data: result.rows[0] });
     } catch (error) {
@@ -181,6 +192,16 @@ export const updateReview = async (req, res) => {
     const { rating, title, body } = req.body;
     const customer_id = req.user.id;
 
+    // Parse and validate rating: integer between 1 and 5
+    const parsedRating = parseInt(rating, 10);
+    if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+        return res.status(400).json({ success: false, message: "Rating must be an integer between 1 and 5." });
+    }
+
+    // Sanitize input to prevent XSS
+    const sanitizedTitle = sanitizeText(title);
+    const sanitizedBody = sanitizeDescription(body);
+
     try {
         // Ensure the review belongs to the customer
         const check = await pool.query("SELECT * FROM reviews WHERE review_id = $1 AND customer_id = $2", [id, customer_id]);
@@ -194,7 +215,7 @@ export const updateReview = async (req, res) => {
             WHERE review_id = $4
             RETURNING *
         `;
-        const result = await pool.query(query, [rating, title, body, id]);
+        const result = await pool.query(query, [parsedRating, sanitizedTitle, sanitizedBody, id]);
         res.status(200).json({ success: true, message: "Review updated successfully", data: result.rows[0] });
     } catch (error) {
         console.error('UPDATE REVIEW ERROR:', error);
