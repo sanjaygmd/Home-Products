@@ -9,10 +9,14 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Detect placeholder keys
 const isPlaceholder = !key_secret || key_secret.includes('your_razorpay') || key_secret === 'razorpay_secret_2026';
 
-let razorpay = null;
-if (!isPlaceholder) {
-  razorpay = new Razorpay({ key_id, key_secret });
-}
+let _razorpay = null;
+const getRazorpay = () => {
+  if (isPlaceholder) return null;
+  if (!_razorpay) {
+    _razorpay = new Razorpay({ key_id, key_secret });
+  }
+  return _razorpay;
+};
 
 /**
  * Verify Razorpay Payment Signature
@@ -22,9 +26,12 @@ export const verifySignature = (razorpayOrderId, razorpayPaymentId, razorpaySign
     if (isProduction) {
       throw new Error("Mock payments are not allowed in production.");
     }
-    return razorpaySignature === 'mock_signature_bypass';
+    // Dynamic mock signature: sha256 of orderId + key_secret (or fallback)
+    const expectedMockSig = crypto.createHmac('sha256', key_secret || 'dev_secret').update(razorpayOrderId).digest('hex');
+    return razorpaySignature === expectedMockSig || razorpaySignature === 'mock_signature_bypass_legacy';
   }
 
+  const razorpay = getRazorpay();
   if (!razorpay) {
     throw new Error("Razorpay is not configured.");
   }
@@ -44,6 +51,7 @@ export const initiateRefund = async (paymentId, amount, notes = "Automated Refun
   try {
     if (!paymentId) return { success: false, message: "No transaction ID provided for refund." };
 
+    const razorpay = getRazorpay();
     if (paymentId.startsWith('order_mock_') || paymentId === 'mock_id' || !razorpay) {
       if (isProduction && paymentId.startsWith('order_mock_')) {
         throw new Error("Cannot refund a mock payment in production.");
@@ -95,15 +103,19 @@ export const createRazorpayOrderInstance = async (amount, currency = 'INR') => {
     if (isProduction) {
       throw new Error("Payment gateway not configured for production.");
     }
+    const mockId = `order_mock_${crypto.randomBytes(8).toString('hex')}`;
+    const mockSig = crypto.createHmac('sha256', key_secret || 'dev_secret').update(mockId).digest('hex');
     return {
       success: true,
       isMock: true,
       order: {
-        id: `order_mock_${crypto.randomBytes(8).toString('hex')}`
-      }
+        id: mockId
+      },
+      mock_signature: mockSig
     };
   }
 
+  const razorpay = getRazorpay();
   if (!razorpay) {
     throw new Error("Razorpay is not initialized.");
   }

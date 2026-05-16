@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { pool } from '../configs/db.js';
-import bcrypt from 'bcrypt';
 
 
 
@@ -254,7 +253,8 @@ export const requireSudo = async (req, res, next) => {
         let isMatch = false;
         const isBcrypt = passwordHash && (passwordHash.startsWith('$2a$') || passwordHash.startsWith('$2b$') || passwordHash.startsWith('$2y$'));
         if (isBcrypt) {
-            isMatch = await bcrypt.compare(password, passwordHash);
+            const bcrypt = await import('bcrypt');
+            isMatch = await bcrypt.default.compare(password, passwordHash);
         } else {
             const legacyMatch = await pool.query("SELECT crypt($1, $2) = $2 AS match", [password, passwordHash]);
             isMatch = !!legacyMatch.rows[0]?.match;

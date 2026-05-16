@@ -95,7 +95,7 @@ const ReviewOrder = ({ onBack, paymentMethod, total, userDetails, items, applied
                 ...orderData,
                 payment_id: response.razorpay_payment_id,
                 razorpay_order_id: response.razorpay_order_id || razorpayOrderRes.order.id,
-                razorpay_signature: response.razorpay_signature || "mock_signature_bypass"
+                razorpay_signature: response.razorpay_signature || razorpayOrderRes.mock_signature || "mock_signature_bypass_legacy"
               });
               if (dbResponse.success) {
                 try {

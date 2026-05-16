@@ -9,6 +9,7 @@ import { sanitizeText } from '../utils/sanitizer.js';
 
 export const createOrder = async (req, res) => {
   const client = await pool.connect();
+  let finalCalculatedTotal = 0; // Scoped for catch block refund safety
   try {
     const {
       address_details, // { full_name, phone, address_line_1, city, state, pincode }
@@ -100,18 +101,18 @@ export const createOrder = async (req, res) => {
       }
     }
 
-    await client.query('BEGIN');
-
-    // 1. Get or Create Address ID (Pattern from Gift Ecommerce)
+    // 1. Get or Create Address ID
     if (!address_id) {
-        const addrRes = await client.query(
-            `INSERT INTO addresses (address_id, customer_id, full_name, phone, address_line_1, city, state, pincode, is_default)
+      const addrRes = await client.query(
+        `INSERT INTO addresses (address_id, customer_id, full_name, phone, address_line_1, city, state, pincode, is_default)
              VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, false)
              RETURNING address_id`,
-            [customer_id, sanitizedAddressDetails.name, sanitizedAddressDetails.phone, sanitizedAddressDetails.address, sanitizedAddressDetails.city, sanitizedAddressDetails.state, sanitizedAddressDetails.pincode]
-        );
-        address_id = addrRes.rows[0].address_id;
+        [customer_id, sanitizedAddressDetails.name, sanitizedAddressDetails.phone, sanitizedAddressDetails.address, sanitizedAddressDetails.city, sanitizedAddressDetails.state, sanitizedAddressDetails.pincode]
+      );
+      address_id = addrRes.rows[0].address_id;
     }
+
+    await client.query('BEGIN');
 
     // 2. Fetch platform fees from admin_settings (Pattern from Gift Ecommerce)
     let customerPlatformFee = 10.00;
@@ -131,24 +132,7 @@ export const createOrder = async (req, res) => {
         console.warn("[SETTINGS] Using default platform fees:", err.message);
     }
 
-    // 1. Get or Create Address ID
-    if (!address_id) {
-      const addrRes = await client.query(
-        `INSERT INTO addresses (address_id, customer_id, full_name, phone, address_line_1, city, state, pincode, is_default)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, false)
-         RETURNING address_id`,
-        [
-          customer_id,
-          sanitizedAddressDetails.name,
-          sanitizedAddressDetails.phone,
-          sanitizedAddressDetails.address,
-          sanitizedAddressDetails.city,
-          sanitizedAddressDetails.state,
-          sanitizedAddressDetails.pincode
-        ]
-      );
-      address_id = addrRes.rows[0].address_id;
-    }
+    await client.query('BEGIN');
 
     // 2. Initial order values (will be updated after item loop)
     const order_id = crypto.randomUUID();
@@ -297,6 +281,7 @@ export const createOrder = async (req, res) => {
     const final_cod_fee = payment_method === 'cod' ? 50 : 0;
     const final_shipping = serverCalculatedSubtotal > 5000 ? 0 : 150;
     const final_total_amount = Math.max(0, serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount);
+    finalCalculatedTotal = final_total_amount; // Store for catch block accessibility
 
     // 6. Insert into orders
     await client.query(
@@ -419,9 +404,11 @@ export const createOrder = async (req, res) => {
     console.error(`[ORDER FATAL ERROR]`, error);
 
     // Transaction Safety: Auto-Refund Orphaned Payments (Pattern from Gift Ecommerce)
-    const { payment_method, payment_id, razorpay_order_id, total_amount } = req.body;
+    const { payment_method, payment_id, razorpay_order_id } = req.body;
     if ((payment_method === 'online' || payment_method === 'razorpay') && payment_id) {
-        autoRefundOrphanedPayment(payment_id, razorpay_order_id, total_amount);
+        // Use server-calculated total if available, otherwise fallback to req.body (last resort)
+        const refundAmount = finalCalculatedTotal > 0 ? finalCalculatedTotal : (req.body.total_amount || 0);
+        await autoRefundOrphanedPayment(payment_id, razorpay_order_id, refundAmount);
     }
 
     // Security Fix: Mask raw technical errors but allow through known business errors
@@ -437,6 +424,9 @@ export const createOrder = async (req, res) => {
 export const getMyOrders = async (req, res) => {
   try {
     const { customer_id: paramId } = req.params;
+    const { limit = 20, page = 1 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    
     const isRestricted = req.user.type === 'customer';
     const customer_id = isRestricted ? req.user.id : (paramId || req.user.id);
 
@@ -453,8 +443,9 @@ export const getMyOrders = async (req, res) => {
               )) FROM order_items oi WHERE oi.order_id = o.order_id) as items
              FROM orders o 
              WHERE o.customer_id = $1 
-             ORDER BY o.placed_at DESC`,
-      [customer_id]
+             ORDER BY o.placed_at DESC
+             LIMIT $2 OFFSET $3`,
+      [customer_id, parseInt(limit), offset]
     );
     res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
@@ -557,6 +548,12 @@ export const updateOrderStatus = async (req, res) => {
     const { order_id } = req.params;
     const { status, notes, courier, tracking_id, est_delivery } = req.body;
     const changed_by = req.user.id;
+
+    // Strict status machine validation
+    const validStatuses = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned', 'Refunded', 'Failed'];
+    if (!validStatuses.includes(status)) {
+        return res.status(400).json({ success: false, message: "Invalid order status provided." });
+    }
 
     // Ownership/Role Check
     if (req.user.type === 'customer' && status !== 'Cancelled') {
@@ -746,7 +743,10 @@ export const updateOrderStatus = async (req, res) => {
     );
 
     // 5. Create Notifications (Customer, Sellers, and Admin)
-    await sendOrderStatusNotifications(order_id, status, client, courier, tracking_id);
+    // Run outside main status transaction to prevent notification failure from rolling back status change
+    sendOrderStatusNotifications(order_id, status, pool, courier, tracking_id).catch(err => {
+        console.error(`[NOTIFY ERROR] Order ${order_id} status updated to ${status}, but notification failed:`, err.message);
+    });
 
     await client.query('COMMIT');
 
@@ -850,23 +850,25 @@ export const createReturnRequest = async (req, res) => {
       [order_item_id]
     );
 
-    // 4. Create notification for admin
+    // 4. Create notification for admin (find first super admin to avoid orphan)
+    const adminRes = await client.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
+    const adminId = adminRes.rows.length > 0 ? adminRes.rows[0].admin_id : null;
+
     await client.query(
-      `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
-             VALUES (gen_random_uuid(), 'return_request', $1, NOW(), false)`,
-      [`New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
+      `INSERT INTO notifications (notification_id, admin_id, type, message, created_at, is_read)
+             VALUES (gen_random_uuid(), $1, 'return_request', $2, NOW(), false)`,
+      [adminId, `New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
     );
 
     await client.query('COMMIT');
     res.status(201).json({ success: true, message: "Return request submitted successfully.", return_id: return_request_id });
 
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) await client.query('ROLLBACK');
     console.error("CREATE RETURN REQUEST ERROR:", error);
     res.status(500).json({ success: false, message: "Failed to submit return request." });
   } finally {
-
-    client.release();
+    if (client) client.release();
   }
 };
 

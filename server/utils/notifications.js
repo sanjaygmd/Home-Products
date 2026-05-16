@@ -73,11 +73,14 @@ export const sendOrderStatusNotifications = async (orderId, newStatus, client = 
             );
         }
 
-        // 6. Insert Global Admin Notification
+        // 6. Insert Global Admin Notification (Avoid orphan by finding a super admin)
+        const adminRes = await client.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
+        const adminId = adminRes.rows.length > 0 ? adminRes.rows[0].admin_id : null;
+
         await client.query(
-            `INSERT INTO notifications (notification_id, type, message, created_at, is_read) 
-             VALUES (gen_random_uuid(), 'admin_alert', $1, NOW(), false)`,
-            [adminMsg]
+            `INSERT INTO notifications (notification_id, admin_id, type, message, created_at, is_read) 
+             VALUES (gen_random_uuid(), $1, 'admin_alert', $2, NOW(), false)`,
+            [adminId, adminMsg]
         );
 
         console.log(`[NOTIFICATIONS] Dispatched notifications for Order ${shortOrderId} (${newStatus})`);

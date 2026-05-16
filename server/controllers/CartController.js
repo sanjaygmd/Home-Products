@@ -54,6 +54,7 @@ export const getCart = async (req, res) => {
                 ci.cart_item_id,
                 ci.quantity,
                 ci.price,
+                ci.price AS "discountPrice",
                 ci.variant_id,
                 p.product_id,
                 p.name,
@@ -273,6 +274,11 @@ export const updateCartItem = async (req, res) => {
         return res.status(400).json({ success: false, message: 'cart_item_id and quantity are required' });
     }
 
+    const qty = parseInt(quantity);
+    if (isNaN(qty)) {
+        return res.status(400).json({ success: false, message: 'Quantity must be a valid number' });
+    }
+
     const client = await pool.connect();
     try {
         // Ownership Check
@@ -289,8 +295,7 @@ export const updateCartItem = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this cart item' });
         }
 
-        const qty = parseInt(quantity);
-        if (!isNaN(qty) && qty > 100) {
+        if (qty > 100) {
             return res.status(400).json({ success: false, message: 'Quantity cannot exceed 100 units per item.' });
         }
 

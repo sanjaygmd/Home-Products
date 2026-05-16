@@ -912,7 +912,8 @@ CREATE TABLE public.sellers (
     store_logo text,
     pan character varying(50),
     aadhar character varying(50),
-    block_reason text
+    block_reason text,
+    commission_rate numeric(5,2)
 );
 
 

@@ -130,6 +130,20 @@ export const getCustomerAddresses = async (id) => {
 
 export const logoutUser = async (userType) => {
     try {
+        if (!userType) {
+            // If userType is unknown, try to logout from all potential session endpoints
+            // This handles cases where currentUser is null but tokens still exist
+            const endpoints = ['/user/admin/logout', '/user/seller/logout', '/user/customer/logout'];
+            let lastRes = { success: false };
+            for (const ep of endpoints) {
+                try {
+                    const res = await api.post(ep);
+                    if (res.data?.success) lastRes = res.data;
+                } catch (e) { /* ignore individual endpoint failures */ }
+            }
+            return lastRes;
+        }
+
         let endpoint = '/user/customer/logout';
         if (userType === 'seller') {
             endpoint = '/user/seller/logout';
