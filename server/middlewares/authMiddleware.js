@@ -1,6 +1,4 @@
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import { pool } from '../configs/db.js';
 import bcrypt from 'bcrypt';
 
@@ -42,7 +40,7 @@ export const requireAuth = (allowedRoles = []) => async (req, res, next) => {
 
         // 2. Query all tokens at once with cached profiles to avoid N+1 queries and expensive JOINs
         const result = await pool.query(`
-            SELECT s.* 
+            SELECT s.session_id, s.user_ref_id, s.user_type, s.last_accessed_at, s.created_at, s.user_profile, s.sudo_verified_at
             FROM auth_sessions s 
             WHERE s.token_hash = ANY($1) 
             AND s.is_blacklisted = false 

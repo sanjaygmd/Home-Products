@@ -59,7 +59,7 @@ const PersonalDetails = ({ onNext }) => {
       setError("All fields are required. Please fill in the complete shipping details.");
       return;
     }
-    
+
     const cleanedPhone = phone.replace(/\D/g, '');
     if (cleanedPhone.length < 10 || cleanedPhone.length > 15) {
       setError("Please provide a valid phone number (10 to 15 digits).");

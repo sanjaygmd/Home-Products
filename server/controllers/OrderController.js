@@ -1,9 +1,10 @@
 import { pool } from '../configs/db.js';
 import { pushOrderToShiprocket, cancelShipment } from './ShipmentController.js';
+import { sendOrderStatusNotifications } from '../utils/notifications.js';
 import { sendOrderConfirmationEmail } from '../utils/email.js';
 import { processAutoPayout } from './PayoutController.js';
 import crypto from 'crypto';
-import Razorpay from 'razorpay';
+import { verifySignature, initiateRefund, createRazorpayOrderInstance, autoRefundOrphanedPayment } from '../services/paymentService.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
 export const createOrder = async (req, res) => {
@@ -31,29 +32,18 @@ export const createOrder = async (req, res) => {
     const customer_id = req.user.id;
 
     // Security Fix: Razorpay Signature Verification
-    if (payment_method === 'online') {
+    if (payment_method === 'online' || payment_method === 'razorpay') {
       if (!payment_id || !razorpay_order_id || !razorpay_signature) {
         return res.status(400).json({ success: false, message: "Missing payment verification details" });
       }
 
-      const isMock = razorpay_order_id.startsWith('order_mock_');
-      if (!isMock) {
-        const secret = process.env.RAZORPAY_KEY_SECRET;
-        if (!secret || secret === 'your_razorpay_secret_here') {
-          console.error("CRITICAL: RAZORPAY_KEY_SECRET NOT CONFIGURED OR USING PLACEHOLDER");
-          return res.status(500).json({ success: false, message: "Payment gateway configuration error. Please contact administrator." });
-        }
-
-        const generated_signature = crypto
-          .createHmac('sha256', secret)
-          .update(razorpay_order_id + "|" + payment_id)
-          .digest('hex');
-
-        if (generated_signature !== razorpay_signature) {
+      try {
+        const isValid = verifySignature(razorpay_order_id, payment_id, razorpay_signature);
+        if (!isValid) {
           return res.status(400).json({ success: false, message: "Invalid payment signature. Transaction rejected." });
         }
-      } else {
-        console.log(`[RAZORPAY BYPASS] Bypassed verification for mock sandbox order ID: ${razorpay_order_id}`);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
       }
     }
 
@@ -77,9 +67,9 @@ export const createOrder = async (req, res) => {
       const { name, phone, address, city, state, pincode } = address_details;
 
       if (!name || !phone || !address || !city || !state || !pincode) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "All address fields (name, phone, address, city, state, pincode) are required for delivery." 
+        return res.status(400).json({
+          success: false,
+          message: "All address fields (name, phone, address, city, state, pincode) are required for delivery."
         });
       }
 
@@ -112,6 +102,35 @@ export const createOrder = async (req, res) => {
 
     await client.query('BEGIN');
 
+    // 1. Get or Create Address ID (Pattern from Gift Ecommerce)
+    if (!address_id) {
+        const addrRes = await client.query(
+            `INSERT INTO addresses (address_id, customer_id, full_name, phone, address_line_1, city, state, pincode, is_default)
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, false)
+             RETURNING address_id`,
+            [customer_id, sanitizedAddressDetails.name, sanitizedAddressDetails.phone, sanitizedAddressDetails.address, sanitizedAddressDetails.city, sanitizedAddressDetails.state, sanitizedAddressDetails.pincode]
+        );
+        address_id = addrRes.rows[0].address_id;
+    }
+
+    // 2. Fetch platform fees from admin_settings (Pattern from Gift Ecommerce)
+    let customerPlatformFee = 10.00;
+    let sellerPlatformFee = 15.00;
+    try {
+        const settingsRes = await client.query(
+            "SELECT key, value FROM admin_settings WHERE key IN ('customer_platform_fee', 'seller_platform_fee')"
+        );
+        for (const row of settingsRes.rows) {
+            const val = typeof row.value === 'object' && row.value !== null ? parseFloat(row.value.fee || row.value) : parseFloat(JSON.parse(row.value));
+            if (!isNaN(val) && val >= 0) {
+                if (row.key === 'customer_platform_fee') customerPlatformFee = val;
+                if (row.key === 'seller_platform_fee') sellerPlatformFee = val;
+            }
+        }
+    } catch (err) {
+        console.warn("[SETTINGS] Using default platform fees:", err.message);
+    }
+
     // 1. Get or Create Address ID
     if (!address_id) {
       const addrRes = await client.query(
@@ -119,12 +138,12 @@ export const createOrder = async (req, res) => {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, false)
          RETURNING address_id`,
         [
-          customer_id, 
-          sanitizedAddressDetails.name, 
-          sanitizedAddressDetails.phone, 
-          sanitizedAddressDetails.address, 
-          sanitizedAddressDetails.city, 
-          sanitizedAddressDetails.state, 
+          customer_id,
+          sanitizedAddressDetails.name,
+          sanitizedAddressDetails.phone,
+          sanitizedAddressDetails.address,
+          sanitizedAddressDetails.city,
+          sanitizedAddressDetails.state,
           sanitizedAddressDetails.pincode
         ]
       );
@@ -134,7 +153,7 @@ export const createOrder = async (req, res) => {
     // 2. Initial order values (will be updated after item loop)
     const order_id = crypto.randomUUID();
     const payment_status = payment_method === 'cod' ? 'Pending' : 'Paid';
-    
+
     // 3. Process items and calculate totals (Security Fix: Server-side price validation)
     let serverCalculatedSubtotal = 0;
     const sellerSubtotals = {};
@@ -171,7 +190,7 @@ export const createOrder = async (req, res) => {
         );
         if (vCheck.rows.length === 0) throw new Error(`Insufficient stock or invalid product variant.`);
         if (vCheck.rows[0].stock_quantity < qty) throw new Error(`Insufficient stock for one or more items.`);
-        
+
         dbPrice = parseFloat(vCheck.rows[0].price);
         dbSellerId = vCheck.rows[0].seller_id;
 
@@ -194,7 +213,7 @@ export const createOrder = async (req, res) => {
 
       const itemTotal = dbPrice * qty;
       serverCalculatedSubtotal += itemTotal;
-      
+
       let currentCommissionRate = globalCommissionRate;
       if (dbSellerId) {
         if (sellerCommissionRates[dbSellerId] !== undefined) {
@@ -229,15 +248,17 @@ export const createOrder = async (req, res) => {
 
     // 4. Validate Coupon and Calculate Discount
     let serverDiscountAmount = 0;
+    let validatedCouponId = null;
     if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
       const couponCheck = await client.query(
-        "SELECT type, discount_percent, discount_amount, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 FOR UPDATE",
+        "SELECT type, discount_percent, discount_amount, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 AND is_active = true AND (valid_until IS NULL OR valid_until > NOW()) FOR UPDATE",
         [coupon_id]
       );
 
       if (couponCheck.rows.length > 0) {
+        validatedCouponId = coupon_id;
         const coupon = couponCheck.rows[0];
-        
+
         if (serverCalculatedSubtotal < parseFloat(coupon.min_order_value || 0)) {
           throw new Error(`Minimum order value for this coupon is ₹${coupon.min_order_value}`);
         }
@@ -272,7 +293,7 @@ export const createOrder = async (req, res) => {
 
     // 5. Final Order Calculations
     const final_tax_amount = Math.round(serverCalculatedSubtotal * 0.05); // 5% Tax
-    const final_platform_fee = 10;
+    const final_platform_fee = customerPlatformFee;
     const final_cod_fee = payment_method === 'cod' ? 50 : 0;
     const final_shipping = serverCalculatedSubtotal > 5000 ? 0 : 150;
     const final_total_amount = Math.max(0, serverCalculatedSubtotal + final_shipping + final_tax_amount + final_platform_fee + final_cod_fee - serverDiscountAmount);
@@ -285,8 +306,8 @@ export const createOrder = async (req, res) => {
         cod_fee, order_status, payment_status, payment_method
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Pending', $12, $13)`,
       [
-        order_id, customer_id, address_id, serverCalculatedSubtotal, final_shipping, 
-        final_tax_amount, final_total_amount, serverDiscountAmount, coupon_id, final_platform_fee, 
+        order_id, customer_id, address_id, serverCalculatedSubtotal, final_shipping,
+        final_tax_amount, final_total_amount, serverDiscountAmount, validatedCouponId, final_platform_fee,
         final_cod_fee, payment_status, payment_method
       ]
     );
@@ -365,21 +386,18 @@ export const createOrder = async (req, res) => {
       [customer_id, order_id, `Your order #${order_id.slice(0, 8).toUpperCase()} has been placed successfully!`]
     );
 
-    await client.query(
-      `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
-       VALUES (gen_random_uuid(), 'new_order', $1, NOW(), false)`,
-      [`New Order #${order_id.slice(0, 8).toUpperCase()} received! Total: ₹${final_total_amount}`]
-    );
+    // Note: Global admin notifications without a specific admin_id are disabled to prevent dead data accumulation.
+    // Admin dashboard should fetch active orders directly from the orders table.
 
     await client.query('COMMIT');
 
     pushOrderToShiprocket(order_id).catch(srError => {
-        console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
+      console.error(`[SHIPROCKET BACKGROUND ERROR] Order ${order_id}:`, srError.message);
     });
 
     // Send order confirmation email securely from the backend (fire and forget)
     try {
-      const custRes = await client.query("SELECT email, full_name FROM customers WHERE customer_id = $1", [customer_id]);
+      const custRes = await pool.query("SELECT email, full_name FROM customers WHERE customer_id = $1", [customer_id]);
       if (custRes.rows.length > 0) {
         const customerEmail = custRes.rows[0].email;
         const customerName = custRes.rows[0].full_name;
@@ -388,7 +406,7 @@ export const createOrder = async (req, res) => {
           totalAmount: final_total_amount,
           paymentMethod: payment_method,
           customerName: customerName
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch (emailErr) {
       console.error("[EMAIL ERROR] Failed to send order confirmation email:", emailErr.message);
@@ -397,12 +415,20 @@ export const createOrder = async (req, res) => {
     res.status(201).json({ success: true, message: "Order placed successfully", order_id });
 
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) await client.query('ROLLBACK');
     console.error(`[ORDER FATAL ERROR]`, error);
+
+    // Transaction Safety: Auto-Refund Orphaned Payments (Pattern from Gift Ecommerce)
+    const { payment_method, payment_id, razorpay_order_id, total_amount } = req.body;
+    if ((payment_method === 'online' || payment_method === 'razorpay') && payment_id) {
+        autoRefundOrphanedPayment(payment_id, razorpay_order_id, total_amount);
+    }
+
     // Security Fix: Mask raw technical errors but allow through known business errors
-    const businessErrors = ["Insufficient stock", "Minimum order value", "Coupon already used", "Coupon expired", "Invalid payment signature", "Administrators are restricted", "Invalid quantity"];
-    const userMessage = businessErrors.some(msg => error.message?.includes(msg)) ? error.message : "Failed to place order. Please try again later.";
-    res.status(500).json({ success: false, message: userMessage });
+    const businessErrors = ["Insufficient stock", "Minimum order value", "Coupon already used", "Coupon expired", "Invalid payment signature", "Administrators are restricted", "Invalid quantity", "Product not found"];
+    const isBusinessError = businessErrors.some(msg => error.message?.includes(msg));
+    const userMessage = isBusinessError ? error.message : "Failed to place order. Please try again later.";
+    res.status(isBusinessError ? 400 : 500).json({ success: false, message: userMessage });
   } finally {
     client.release();
   }
@@ -416,7 +442,15 @@ export const getMyOrders = async (req, res) => {
 
     const result = await pool.query(
       `SELECT o.*, 
-             (SELECT json_agg(oi.*) FROM order_items oi WHERE oi.order_id = o.order_id) as items
+             (SELECT json_agg(json_build_object(
+                'order_item_id', oi.order_item_id,
+                'product_id', oi.product_id,
+                'variant_id', oi.variant_id,
+                'quantity', oi.quantity,
+                'unit_price', oi.unit_price,
+                'total_price', oi.total_price,
+                'item_status', oi.item_status
+              )) FROM order_items oi WHERE oi.order_id = o.order_id) as items
              FROM orders o 
              WHERE o.customer_id = $1 
              ORDER BY o.placed_at DESC`,
@@ -470,10 +504,11 @@ export const getOrderById = async (req, res) => {
       return res.status(403).json({ success: false, message: "Unauthorized access to order details" });
     }
 
-    // Fetch order items with product details, commission info, and return details
+    // Fetch order items with product details, commission info (admins only), and return details
+    const isAdmin = req.user.type === 'admin' || req.user.type === 'super_admin';
     const itemsRes = await pool.query(
       `SELECT oi.*, p.name as product_name, p.slug, p.images, pv.variant_name, pv.variant_value,
-                    sc.commission_rate, sc.commission_amount, sc.seller_earnings,
+                    ${isAdmin ? 'sc.commission_rate, sc.commission_amount, sc.seller_earnings,' : ''}
                     rr.return_request_id, rr.reason as return_reason, rr.return_type, rr.refund_amount as return_refund_amount,
                     rr.refund_status as return_refund_status, rr.resolution_note as return_resolution_note,
                     rs.reverse_awb_code, rs.status as reverse_shipment_status
@@ -627,7 +662,7 @@ export const updateOrderStatus = async (req, res) => {
         // [FIX] Duplicate Transaction Guard: Only log 'order_payment' for COD on delivery. 
         // Online payments are already logged at creation (createOrder step 5b).
         const orderInfo = await client.query('SELECT payment_method FROM orders WHERE order_id = $1', [order_id]);
-        
+
         if (orderInfo.rows[0]?.payment_method === 'cod') {
           await client.query(
             `INSERT INTO finance_transactions (finance_transactions_id, order_id, payment_id, transaction_type, amount, created_at)
@@ -669,11 +704,39 @@ export const updateOrderStatus = async (req, res) => {
                     `, [s.seller_subtotal, s.seller_id, orderInfo.rows[0].date]);
         }
       }
-    }
 
-    // 3. Handle Shiprocket Cancellation if applicable
-    if (status === 'Cancelled') {
-      await cancelShipment(order_id);
+      // Handle Refund if Paid online
+      const paymentInfo = await client.query(
+        "SELECT transaction_id, amount, payment_status, payment_method FROM payments WHERE order_id = $1",
+        [order_id]
+      );
+
+      if (paymentInfo.rows.length > 0) {
+        const p = paymentInfo.rows[0];
+        if (p.payment_status === 'Paid' && (p.payment_method === 'online' || p.payment_method === 'razorpay')) {
+          console.log(`[PAYMENT] Initiating automated refund for order ${order_id}...`);
+          const refundRes = await initiateRefund(p.transaction_id, p.amount, `Order ${order_id} Cancelled`);
+          if (refundRes.success) {
+            await client.query(
+              "UPDATE payments SET payment_status = 'Refunded', updated_at = NOW() WHERE order_id = $1",
+              [order_id]
+            );
+            await client.query(
+              `INSERT INTO finance_transactions (finance_transactions_id, order_id, transaction_type, amount, created_at, notes)
+                     VALUES (gen_random_uuid(), $1, 'refund', $2, NOW(), $3)`,
+              [order_id, p.amount, `Refund ID: ${refundRes.refund_id}`]
+            );
+          } else {
+            console.error(`[REFUND FAILED] Order ${order_id}:`, refundRes.message);
+          }
+        } else {
+          // Just update status to Cancelled for COD
+          await client.query(
+            "UPDATE payments SET payment_status = 'Cancelled', updated_at = NOW() WHERE order_id = $1",
+            [order_id]
+          );
+        }
+      }
     }
 
     // 4. Add to history
@@ -682,25 +745,26 @@ export const updateOrderStatus = async (req, res) => {
       [order_id, changed_by, status, notes || `Order status updated to ${status}`]
     );
 
-    // 5. Create Notification for Customer
-    const customerIdRes = await client.query("SELECT customer_id FROM orders WHERE order_id = $1", [order_id]);
-    if (customerIdRes.rows.length > 0) {
-      const customer_id = customerIdRes.rows[0].customer_id;
-      await client.query(
-        `INSERT INTO notifications (notification_id, customer_id, order_id, is_read, type, message, created_at)
-                 VALUES (gen_random_uuid(), $1, $2, false, 'status_update', $3, NOW())`,
-        [customer_id, order_id, `Your order #${order_id.slice(0, 8).toUpperCase()} status has been updated to: ${status}`]
-      );
-    }
+    // 5. Create Notifications (Customer, Sellers, and Admin)
+    await sendOrderStatusNotifications(order_id, status, client, courier, tracking_id);
 
     await client.query('COMMIT');
+
+    // 3. Handle Shiprocket Cancellation if applicable (Moved outside transaction)
+    if (status === 'Cancelled') {
+      try {
+        await cancelShipment(order_id);
+      } catch (srErr) {
+        console.error(`[SHIPROCKET CANCEL ERROR] Order ${order_id}:`, srErr.message);
+      }
+    }
+
     res.status(200).json({ success: true, message: "Order status updated successfully" });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) await client.query('ROLLBACK');
     console.error("UPDATE ORDER STATUS ERROR:", error);
     res.status(500).json({ success: false, message: "Failed to update order status" });
   } finally {
-
     client.release();
   }
 };
@@ -709,101 +773,101 @@ export const updateOrderStatus = async (req, res) => {
  * Create a Return Request (Customer Side)
  */
 export const createReturnRequest = async (req, res) => {
-    const client = await pool.connect();
-    try {
-        const { order_id, order_item_id, reason, return_type } = req.body;
-        const customer_id = req.user.id;
+  const client = await pool.connect();
+  try {
+    const { order_id, order_item_id, reason, return_type } = req.body;
+    const customer_id = req.user.id;
 
-        if (!order_id || !order_item_id || !customer_id || !reason || !return_type) {
-            return res.status(400).json({ success: false, message: "Missing required fields for return request." });
-        }
+    if (!order_id || !order_item_id || !customer_id || !reason || !return_type) {
+      return res.status(400).json({ success: false, message: "Missing required fields for return request." });
+    }
 
-        // Whitelist return_type strictly to ['Refund', 'Replacement']
-        const allowedReturnTypes = ['Refund', 'Replacement'];
-        if (!allowedReturnTypes.includes(return_type)) {
-            return res.status(400).json({ success: false, message: "Invalid return type. Must be Refund or Replacement." });
-        }
+    // Whitelist return_type strictly to ['Refund', 'Replacement']
+    const allowedReturnTypes = ['Refund', 'Replacement'];
+    if (!allowedReturnTypes.includes(return_type)) {
+      return res.status(400).json({ success: false, message: "Invalid return type. Must be Refund or Replacement." });
+    }
 
-        // Sanitize user-provided reason to prevent stored XSS
-        const sanitizedReason = sanitizeText(reason);
+    // Sanitize user-provided reason to prevent stored XSS
+    const sanitizedReason = sanitizeText(reason);
 
-        await client.query('BEGIN');
+    await client.query('BEGIN');
 
-        // Check if return request already exists
-        const existingReturn = await client.query(
-            "SELECT 1 FROM return_requests WHERE order_item_id = $1",
-            [order_item_id]
-        );
-        if (existingReturn.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ success: false, message: "Return request has already been submitted for this item." });
-        }
+    // Check if return request already exists
+    const existingReturn = await client.query(
+      "SELECT 1 FROM return_requests WHERE order_item_id = $1",
+      [order_item_id]
+    );
+    if (existingReturn.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: "Return request has already been submitted for this item." });
+    }
 
-        // 1. Verify the order belongs to the customer and is delivered
-        const orderCheck = await client.query(
-            "SELECT order_status FROM orders WHERE order_id = $1 AND customer_id = $2",
-            [order_id, customer_id]
-        );
+    // 1. Verify the order belongs to the customer and is delivered
+    const orderCheck = await client.query(
+      "SELECT order_status FROM orders WHERE order_id = $1 AND customer_id = $2",
+      [order_id, customer_id]
+    );
 
-        if (orderCheck.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: "Order not found or does not belong to you." });
-        }
+    if (orderCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Order not found or does not belong to you." });
+    }
 
-        if (orderCheck.rows[0].order_status !== 'Delivered') {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ success: false, message: "Only delivered orders can be returned." });
-        }
+    if (orderCheck.rows[0].order_status !== 'Delivered') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: "Only delivered orders can be returned." });
+    }
 
-        // 2. Verify the order item exists
-        const itemCheck = await client.query(
-            "SELECT unit_price, quantity FROM order_items WHERE order_item_id = $1 AND order_id = $2",
-            [order_item_id, order_id]
-        );
+    // 2. Verify the order item exists
+    const itemCheck = await client.query(
+      "SELECT unit_price, quantity FROM order_items WHERE order_item_id = $1 AND order_id = $2",
+      [order_item_id, order_id]
+    );
 
-        if (itemCheck.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: "Order item not found." });
-        }
+    if (itemCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: "Order item not found." });
+    }
 
-        const { unit_price, quantity } = itemCheck.rows[0];
-        const refund_amount = unit_price * quantity;
+    const { unit_price, quantity } = itemCheck.rows[0];
+    const refund_amount = unit_price * quantity;
 
-        // 3. Insert into return_requests with sanitized reason
-        const returnRes = await client.query(
-            `INSERT INTO return_requests (
+    // 3. Insert into return_requests with sanitized reason
+    const returnRes = await client.query(
+      `INSERT INTO return_requests (
                 return_request_id, order_id, order_item_id, customer_id, 
                 reason, return_type, refund_amount, refund_status, requested_at
             ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'Pending', NOW())
             RETURNING return_request_id`,
-            [order_id, order_item_id, customer_id, sanitizedReason, return_type, refund_amount]
-        );
-        const return_request_id = returnRes.rows[0].return_request_id;
+      [order_id, order_item_id, customer_id, sanitizedReason, return_type, refund_amount]
+    );
+    const return_request_id = returnRes.rows[0].return_request_id;
 
-        // 3b. Update order_items SET item_status = 'Return Pending'
-        await client.query(
-            "UPDATE order_items SET item_status = 'Return Pending' WHERE order_item_id = $1",
-            [order_item_id]
-        );
+    // 3b. Update order_items SET item_status = 'Return Pending'
+    await client.query(
+      "UPDATE order_items SET item_status = 'Return Pending' WHERE order_item_id = $1",
+      [order_item_id]
+    );
 
-        // 4. Create notification for admin
-        await client.query(
-            `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
+    // 4. Create notification for admin
+    await client.query(
+      `INSERT INTO notifications (notification_id, type, message, created_at, is_read)
              VALUES (gen_random_uuid(), 'return_request', $1, NOW(), false)`,
-            [`New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
-        );
+      [`New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
+    );
 
-        await client.query('COMMIT');
-        res.status(201).json({ success: true, message: "Return request submitted successfully.", return_id: return_request_id });
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, message: "Return request submitted successfully.", return_id: return_request_id });
 
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error("CREATE RETURN REQUEST ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to submit return request." });
-    } finally {
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("CREATE RETURN REQUEST ERROR:", error);
+    res.status(500).json({ success: false, message: "Failed to submit return request." });
+  } finally {
 
-        client.release();
-    }
+    client.release();
+  }
 };
 
 /**
@@ -820,49 +884,10 @@ export const createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'A valid positive amount is required.' });
     }
 
-    const key_secret = process.env.RAZORPAY_KEY_SECRET;
-    const key_id = process.env.RAZORPAY_KEY_ID;
-
-    // Detect placeholder keys or development bypass
-    const isPlaceholder = !key_secret || key_secret.includes('your_razorpay') || key_secret === 'razorpay_secret_2026';
-    if (isPlaceholder) {
-      console.warn('[RAZORPAY WARNING] Using placeholder credentials. Activating secure Sandbox Bypass mode for development.');
-      return res.status(200).json({
-        success: true,
-        isMock: true,
-        order: {
-          id: `order_mock_${crypto.randomBytes(8).toString('hex')}`
-        }
-      });
-    }
-
-    const razorpay = new Razorpay({ key_id, key_secret });
-
-    const options = {
-      amount: Math.round(Number(amount) * 100), // paise
-      currency,
-      receipt: `order_receipt_${Date.now()}`
-    };
-
-    try {
-      const order = await razorpay.orders.create(options);
-      return res.status(200).json({ success: true, order });
-    } catch (apiErr) {
-      // If Razorpay returns an auth error (401), fall back to mock sandbox in development so developers can test
-      if (apiErr.statusCode === 401) {
-        console.warn('[RAZORPAY AUTH FAILED] Razorpay API rejected key/secret. Activating Sandbox Bypass mode.');
-        return res.status(200).json({
-          success: true,
-          isMock: true,
-          order: {
-            id: `order_mock_${crypto.randomBytes(8).toString('hex')}`
-          }
-        });
-      }
-      throw apiErr;
-    }
+    const result = await createRazorpayOrderInstance(amount, currency);
+    return res.status(200).json(result);
   } catch (error) {
     console.error('[RAZORPAY ORDER CREATION ERROR]', error);
-    return res.status(500).json({ success: false, message: 'Failed to initiate payment. Please try again.' });
+    return res.status(500).json({ success: false, message: error.message || 'Failed to initiate payment. Please try again.' });
   }
 };

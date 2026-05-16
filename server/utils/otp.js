@@ -5,6 +5,9 @@ export const generateOtp = () => {
 };
 
 export const hashOtp = (otp, salt = "") => {
-  const pepper = process.env.MASTER_SECURITY_KEY || "default_gmd_pepper";
+  const pepper = process.env.MASTER_SECURITY_KEY;
+  if (!pepper) {
+    throw new Error("CRITICAL: MASTER_SECURITY_KEY environment variable is not set. OTP operations aborted for security.");
+  }
   return crypto.createHash("sha256").update(otp + salt + pepper).digest("hex");
 };

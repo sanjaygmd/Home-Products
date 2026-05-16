@@ -56,7 +56,13 @@ export function AuthProvider({ children }) {
 
   const logoutUser = async () => {
     try {
-      const role = currentUser?.role;
+      let role = currentUser?.role;
+      if (!role) {
+        // Fallback: Determine role from localStorage if currentUser is already null
+        if (localStorage.getItem('admin')) role = 'admin';
+        else if (localStorage.getItem('seller')) role = 'seller';
+        else if (localStorage.getItem('user')) role = 'customer';
+      }
       await authServiceLogout(role);
     } catch (error) {
       console.error("Logout error:", error);
@@ -77,7 +83,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ currentUser, loginUser, loginSeller, loginAdmin, logoutUser, loading }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }

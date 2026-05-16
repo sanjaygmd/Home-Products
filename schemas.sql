@@ -197,7 +197,12 @@ CREATE TABLE public.auth_sessions (
     ip_address inet,
     is_blacklisted boolean DEFAULT false,
     expires_at timestamp without time zone NOT NULL,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_accessed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    sudo_verified_at timestamp without time zone,
+    user_profile jsonb DEFAULT '{}'::jsonb,
+    last_ip inet,
+    last_device jsonb
 );
 
 
@@ -604,6 +609,24 @@ CREATE TABLE public.otp_verifications (
 
 
 ALTER TABLE public.otp_verifications OWNER TO postgres;
+
+--
+-- Name: persistent_otps; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.persistent_otps (
+    email character varying(255) NOT NULL,
+    otp_type character varying(50) NOT NULL,
+    otp_code character varying(255) NOT NULL,
+    attempts integer DEFAULT 0,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    expires_at timestamp without time zone NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (email, otp_type)
+);
+
+
+ALTER TABLE public.persistent_otps OWNER TO postgres;
 
 --
 -- TOC entry 237 (class 1259 OID 18140)

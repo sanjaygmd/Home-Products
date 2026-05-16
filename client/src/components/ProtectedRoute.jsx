@@ -35,7 +35,7 @@ export const AdminProtectedRoute = ({ children }) => {
     if (loading) return <AuthLoader />;
 
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) {
-        return <Navigate to="/admin/login" state={{ from: location }} replace />;
+        return <Navigate to="/admin/login" state={{ from: location, message: "Authentication required or session expired." }} replace />;
     }
 
     return children;
@@ -47,7 +47,7 @@ export const CustomerProtectedRoute = ({ children }) => {
 
     if (loading) return <AuthLoader />;
 
-    if (!currentUser || (currentUser.role !== 'customer' && currentUser.role !== 'admin' && currentUser.role !== 'super_admin')) {
+    if (!currentUser || currentUser.role !== 'customer') {
         return <Navigate to="/customer-login" state={{ from: location }} replace />;
     }
 

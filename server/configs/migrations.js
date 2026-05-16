@@ -36,11 +36,13 @@ export const runSchemaMigrations = async () => {
         );
     `);
     
-    // 3. Ensure last_accessed_at and sudo_verified_at columns exist on auth_sessions table
+    // 3. Ensure session columns exist on auth_sessions table
     await pool.query(`
         ALTER TABLE auth_sessions 
         ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        ADD COLUMN IF NOT EXISTS sudo_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ADD COLUMN IF NOT EXISTS sudo_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS last_ip INET,
+        ADD COLUMN IF NOT EXISTS last_device JSONB
     `);
 
     // 4. Ensure discount_amount column exists on coupons table

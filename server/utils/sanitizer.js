@@ -1,11 +1,14 @@
-let rawSanitizeHtml;
-try {
-  // Use dynamic import with top-level await to gracefully handle if sanitize-html is not yet installed
-  const module = await import('sanitize-html');
-  rawSanitizeHtml = module.default;
-} catch (e) {
-  rawSanitizeHtml = null;
-}
+let rawSanitizeHtml = null;
+
+// Self-executing async function to load the package without blocking module export
+(async () => {
+  try {
+    const module = await import('sanitize-html');
+    rawSanitizeHtml = module.default;
+  } catch (e) {
+    console.warn("[SANITIZER] sanitize-html package not found. Using robust fallback regex.");
+  }
+})();
 
 const sanitizeHtml = rawSanitizeHtml;
 
@@ -55,12 +58,18 @@ export const sanitizeDescription = (html) => {
   // Fallback: Strip all unsafe tags, attributes, and scripts entirely
   const allowed = ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li'];
   
-  // 1. Remove dangerous script, style, iframe, object, embed blocks and their content completely
-  let clean = html.replace(/<(script|iframe|style|object|embed)[^>]*>([\s\S]*?)<\/\1>/gi, '');
+  // 1. Remove dangerous script, style, iframe, object, embed blocks and their content completely (recursive check)
+  let clean = html;
+  let prev;
+  do {
+    prev = clean;
+    clean = clean.replace(/<(script|iframe|style|object|embed|svg|math)[^>]*>([\s\S]*?)<\/\1>/gi, '');
+  } while (clean !== prev);
   
   // 2. Strip any inline event handlers (e.g., onclick, onerror) and javascript: protocol URIs
   clean = clean.replace(/on\w+\s*=\s*(['\"][^'\"]*['\"]|[^>\s]+)/gi, '');
-  clean = clean.replace(/javascript\s*:\s*[^\"\'\s>]+/gi, '');
+  clean = clean.replace(/(javascript|data|vbscript)\s*:\s*[^\"\'\s>]+/gi, '');
+  clean = clean.replace(/&#[xX]?[0-9a-fA-F]+;?/g, ''); // Strip HTML entities that could hide protocols
 
   // 3. Normalize tags: remove attributes from all tags to prevent style or event payload execution
   clean = clean.replace(/<([a-z1-6]+)(?:\s+[^>]*)?>/gi, (match, tagName) => {
@@ -88,16 +97,13 @@ export const sanitizeDescription = (html) => {
  * Enforces http/https, blocks private subnet IPs/localhost/link-local, and cleans unsafe characters.
  */
 export const isValidImageUrl = (urlStr) => {
-  console.log('[DEBUG IMAGE VALIDATION] Checking image URL:', JSON.stringify(urlStr));
   if (!urlStr || typeof urlStr !== 'string') {
-    console.log('[DEBUG IMAGE VALIDATION] Failed: null or not a string');
     return false;
   }
 
   try {
     // Basic character safety to block injection
     if (urlStr.includes('<') || urlStr.includes('>') || urlStr.includes('"') || urlStr.includes("'")) {
-      console.log('[DEBUG IMAGE VALIDATION] Failed: contains unsafe injection characters');
       return false;
     }
 
@@ -106,7 +112,6 @@ export const isValidImageUrl = (urlStr) => {
     if (isDataUri) {
       // Regex enforces safe MIME types and standard base64 character set
       const matchesData = /^data:image\/(jpeg|jpg|png|webp|gif|bmp);base64,[A-Za-z0-9+/=\s]+$/i.test(urlStr);
-      console.log('[DEBUG IMAGE VALIDATION] Data URI validation result:', matchesData);
       return matchesData;
     }
 
@@ -115,12 +120,10 @@ export const isValidImageUrl = (urlStr) => {
     if (isRelativePath) {
       // Enforce strict security boundaries for local paths
       if (urlStr.includes('..') || urlStr.includes('\\') || urlStr.includes(':')) {
-        console.log('[DEBUG IMAGE VALIDATION] Failed: relative path contains traversal or protocols');
         return false; // Prevent path traversal and protocol bypasses
       }
       // Validate correct safe image extension
       const matchesExt = /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(urlStr);
-      console.log('[DEBUG IMAGE VALIDATION] Relative path validation result:', matchesExt);
       return matchesExt;
     }
 
@@ -128,7 +131,6 @@ export const isValidImageUrl = (urlStr) => {
 
     // Enforce allowed protocols
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      console.log('[DEBUG IMAGE VALIDATION] Failed: protocol is not http/https:', parsed.protocol);
       return false;
     }
 
@@ -146,14 +148,11 @@ export const isValidImageUrl = (urlStr) => {
     const isPrivateIpv6 = cleanHost.startsWith('fe80:') || cleanHost.startsWith('fc00:') || cleanHost.startsWith('fd00:') || cleanHost === '::';
 
     if (isLoopback || isPrivateIpv4 || isPrivateIpv6) {
-      console.log('[DEBUG IMAGE VALIDATION] Failed: Resolves to private/loopback IP address');
       return false;
     }
 
-    console.log('[DEBUG IMAGE VALIDATION] Success: Valid absolute image URL');
     return true;
   } catch (err) {
-    console.log('[DEBUG IMAGE VALIDATION] Failed with exception:', err.message);
     return false;
   }
 };

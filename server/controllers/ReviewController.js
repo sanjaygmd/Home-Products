@@ -28,6 +28,11 @@ export const getAllReviews = async (req, res) => {
 export const deleteReview = async (req, res) => {
     const { id } = req.params;
     try {
+        const check = await pool.query("SELECT 1 FROM reviews WHERE review_id = $1", [id]);
+        if (check.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Review not found" });
+        }
+
         await pool.query("DELETE FROM reviews WHERE review_id = $1", [id]);
         res.status(200).json({ success: true, message: "Review deleted successfully" });
     } catch (error) {

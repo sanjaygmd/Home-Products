@@ -1,4 +1,5 @@
 import { pool } from "../../configs/db.js";
+import { initiateRefund } from '../../services/paymentService.js';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { createAuthSession, invalidateSession, cookieConfig, getCookieName, setSessionCookie } from "../../utils/authSession.js";
@@ -1236,7 +1237,30 @@ export const markReturnReceived = async (req, res) => {
       [id]
     );
 
-    // 5. Notify customer
+    // 5. Initiate Automated Refund for the specific return amount
+    const paymentInfo = await client.query(
+      "SELECT transaction_id, payment_method FROM payments WHERE order_id = $1",
+      [rrRes.rows[0].order_id]
+    );
+
+    if (paymentInfo.rows.length > 0) {
+      const p = paymentInfo.rows[0];
+      if (p.payment_method === 'online' || p.payment_method === 'razorpay') {
+        console.log(`[RETURN] Initiating automated refund for return ${id}...`);
+        const refundRes = await initiateRefund(p.transaction_id, rrRes.rows[0].refund_amount, `Return ${id} Received`);
+        if (refundRes.success) {
+            await client.query(
+                `INSERT INTO finance_transactions (finance_transactions_id, order_id, transaction_type, amount, created_at, notes)
+                 VALUES (gen_random_uuid(), $1, 'refund', $2, NOW(), $3)`,
+                [rrRes.rows[0].order_id, rrRes.rows[0].refund_amount, `Return Refund ID: ${refundRes.refund_id}`]
+            );
+        } else {
+            console.error(`[RETURN REFUND FAILED] Return ${id}:`, refundRes.message);
+        }
+      }
+    }
+
+    // 6. Notify customer
     await client.query(
       `INSERT INTO notifications (notification_id, customer_id, type, message, created_at)
        VALUES (gen_random_uuid(), $1, 'return_complete', $2, NOW())`,

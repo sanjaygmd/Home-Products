@@ -11,21 +11,21 @@ const hasDbUrl = !!process.env.DB_URL;
 const hasDiscreteDb = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME'].every(v => !!process.env[v]);
 
 if (!hasDbUrl && !hasDiscreteDb) {
-  missingEnvVars.push('DB_URL (or DB_USER + DB_PASSWORD + DB_HOST + DB_PORT + DB_NAME)');
+    missingEnvVars.push('DB_URL (or DB_USER + DB_PASSWORD + DB_HOST + DB_PORT + DB_NAME)');
 }
 
 if (missingEnvVars.length > 0) {
-  console.error("========================================================================");
-  console.error("  FATAL CONFIGURATION ERROR: Required environment variables are missing!");
-  console.error("========================================================================");
-  missingEnvVars.forEach(v => console.error(`  [MISSING]: ${v}`));
-  console.error("");
-  console.error("  Helpful Guide:");
-  console.error("  1. Copy '.env.example' template to '.env' in your server folder.");
-  console.error("  2. Populate the placeholder values with your real configuration details.");
-  console.error("  3. Restart the server node process.");
-  console.error("========================================================================");
-  process.exit(1);
+    console.error("========================================================================");
+    console.error("  FATAL CONFIGURATION ERROR: Required environment variables are missing!");
+    console.error("========================================================================");
+    missingEnvVars.forEach(v => console.error(`  [MISSING]: ${v}`));
+    console.error("");
+    console.error("  Helpful Guide:");
+    console.error("  1. Copy '.env.example' template to '.env' in your server folder.");
+    console.error("  2. Populate the placeholder values with your real configuration details.");
+    console.error("  3. Restart the server node process.");
+    console.error("========================================================================");
+    process.exit(1);
 }
 
 import fs from 'fs';
@@ -45,6 +45,8 @@ import notificationRoutes from './routes/NotificationRoutes.js';
 import pickupRoutes from './routes/PickupRoutes.js';
 import productRoutes from './routes/ProductRoutes.js';
 import cartRoutes from './routes/CartRoutes.js';
+import { addGiftColumns } from './migrations/add_gift_columns.js';
+import { runPaymentHardeningMigration } from './migrations/payment_hardening.js';
 import wishlistRoutes from './routes/WishlistRoutes.js';
 import orderRoutes from './routes/OrderRoutes.js';
 import shiprocketRoutes from './routes/shiprocketRoutes.js';
@@ -52,6 +54,7 @@ import chatbotRoutes from './routes/chatbotRoutes.js';
 import { runMigration as runSystemConfigMigration } from './migrations/systemConfigMigration.js';
 import { fixSellerConstraints } from './migrations/fix_seller_constraints.js';
 import { pruneExpiredRecords } from './utils/cleanupTask.js';
+import { handleRazorpayWebhook } from './controllers/WebhookController.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -78,14 +81,14 @@ app.use(cors({
             'http://localhost:5174',
             'http://127.0.0.1:5174'
         ];
-        
+
         // Robust development check: allow any localhost port if port collides
         const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-        
-        const isAllowed = allowedOrigins.indexOf(origin) !== -1 || 
-                          (origin === undefined && process.env.NODE_ENV === 'development') ||
-                          (isLocalhost && process.env.NODE_ENV === 'development');
-        
+
+        const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+            (origin === undefined && process.env.NODE_ENV === 'development') ||
+            (isLocalhost && process.env.NODE_ENV === 'development');
+
         if (isAllowed) {
             callback(null, true);
         } else {
@@ -104,16 +107,16 @@ if (process.env.NODE_ENV === 'development') {
             const duration = Date.now() - start;
             const entry = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} - ${res.statusCode} (${duration}ms)\n`;
             const logPath = path.join(process.cwd(), 'debug_requests.log');
-            
+
             // Perform async append to never block event loop
             fs.appendFile(logPath, entry, (err) => {
                 if (err) return;
-                
+
                 // Stat check asynchronously for log rotation
                 fs.stat(logPath, (err, stats) => {
                     if (!err && stats.size > 5 * 1024 * 1024) {
                         const backupPath = path.join(process.cwd(), 'debug_requests.log.old');
-                        fs.rename(logPath, backupPath, () => {});
+                        fs.rename(logPath, backupPath, () => { });
                     }
                 });
             });
@@ -166,6 +169,8 @@ app.use('/user/customer/verify-otp', otpLimiter); // Protect verification from b
 app.use('/user/seller/verify-otp', otpLimiter);
 app.use('/user/admin/verify-password-reset', otpLimiter);
 
+app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), handleRazorpayWebhook);
+
 app.use('/user', authRoutes);
 app.use('/coupon', couponRoutes);
 app.use('/payout', payoutRoutes);
@@ -187,7 +192,7 @@ app.use((err, req, res, next) => {
     console.error("GLOBAL ERROR:", err.stack);
     const status = err.status || 500;
     const message = err.message || "Internal Server Error";
-    
+
     res.status(status).json({
         success: false,
         message: status === 500 ? "An unexpected error occurred. Please try again later." : message,
@@ -202,6 +207,8 @@ app.listen(port, () => {
 testDB()
     .then(() => runSchemaMigrations())          // Run decoupled schema migrations
     .then(() => runSystemConfigMigration())     // Ensure system_config table & master_key column
+    .then(() => addGiftColumns())               // Add GMD specialized gift features
+    .then(() => runPaymentHardeningMigration()) // Add payment hardening (orphaned payments, settings)
     .then(() => fixSellerConstraints())         // Ensure correct FK constraints on seller tables
     .then(() => pruneExpiredRecords())          // Safe, idempotent cleanup on startup
     .catch((err) => {

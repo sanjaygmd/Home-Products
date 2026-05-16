@@ -9,8 +9,8 @@ import ReviewOrder from "./ReviewOrder";
 import OrderSummary from "./OrderSummary";
 
 const CheckoutPage = () => {
-    const location = useLocation();
-    const navigate = useNavigate();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { cart } = useContext(CartContext);
   const { currentUser } = useAuth();
 
@@ -31,23 +31,23 @@ const CheckoutPage = () => {
 
   const items = buyNowProduct ? [buyNowProduct] : (checkoutItems || cart);
 
-const subtotal = items.reduce((acc, item) => {
-  if (item.stock === 0) return acc;
-  return acc + item.discountPrice * (item.quantity || 1);
-}, 0);
+  const subtotal = items.reduce((acc, item) => {
+    if (item.stock === 0) return acc;
+    return acc + (item.discountPrice || item.price || 0) * (item.quantity || 1);
+  }, 0);
 
 
   const delivery = subtotal > 5000 ? 0 : 150;
   const gst = Math.round(subtotal * 0.05);
   const codFee = paymentMethod === "cod" ? 50 : 0;
   const platformFee = 10;
-  
-  const discountAmount = appliedCoupon 
+
+  const discountAmount = appliedCoupon
     ? (appliedCoupon.type === 'percentage')
       ? Math.min(
-          (subtotal * parseFloat(appliedCoupon.discount_percent || 0)) / 100, 
-          parseFloat(appliedCoupon.max_discount || Infinity)
-        ) 
+        (subtotal * parseFloat(appliedCoupon.discount_percent || 0)) / 100,
+        parseFloat(appliedCoupon.max_discount || Infinity)
+      )
       : parseFloat(appliedCoupon.discount_amount || 0)
     : 0;
 

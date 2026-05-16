@@ -150,7 +150,7 @@ const OrderSummary = ({
         </div>
 
         <span className="text-2xl font-bold text-blue-700 tracking-tight">
-          ₹{parseFloat(total).toFixed(2)}
+          ₹{finalTotal.toFixed(2)}
         </span>
 
       </div>

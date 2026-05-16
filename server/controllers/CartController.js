@@ -101,8 +101,8 @@ export const addToCart = async (req, res) => {
     quantity = parseInt(quantity) || 1;
     price = parseFloat(price);
 
-    if (!customer_id || !product_id || !price) {
-        return res.status(400).json({ success: false, message: 'customer_id, product_id and price are required' });
+    if (!customer_id || !product_id) {
+        return res.status(400).json({ success: false, message: 'customer_id and product_id are required' });
     }
 
     if (req.user.id !== customer_id && !['admin', 'super_admin'].includes(req.user.type)) {
@@ -342,13 +342,13 @@ export const updateCartItem = async (req, res) => {
         }
 
         let result;
-        if (quantity <= 0) {
+        if (qty <= 0) {
             result = await client.query('DELETE FROM cart_items WHERE cart_item_id = $1 RETURNING cart_id', [cart_item_id]);
         } else {
             // Update quantity and price in cart_items using latest DB price
             result = await client.query(
                 'UPDATE cart_items SET quantity = $1, price = $2, updated_at = NOW() WHERE cart_item_id = $3 RETURNING cart_id',
-                [quantity, dbPrice, cart_item_id]
+                [qty, dbPrice, cart_item_id]
             );
         }
 
