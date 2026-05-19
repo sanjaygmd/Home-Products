@@ -132,8 +132,6 @@ export const createOrder = async (req, res) => {
         console.warn("[SETTINGS] Using default platform fees:", err.message);
     }
 
-    await client.query('BEGIN');
-
     // 2. Initial order values (will be updated after item loop)
     const order_id = crypto.randomUUID();
     const payment_status = payment_method === 'cod' ? 'Pending' : 'Paid';
@@ -309,7 +307,7 @@ export const createOrder = async (req, res) => {
 
       const sale_amount = item.total_price;
       const commission_rate = item.commission_rate;
-      const commission_amount = sale_amount * commission_rate;
+      const commission_amount = (sale_amount * commission_rate) + sellerPlatformFee;
       const seller_earnings = sale_amount - commission_amount;
 
       await client.query(
@@ -453,7 +451,7 @@ export const getMyOrders = async (req, res) => {
              WHERE o.customer_id = $1 
              ORDER BY o.placed_at DESC
              LIMIT $2 OFFSET $3`,
-      [customer_id, parseInt(limit), offset]
+      [customer_id, parsedLimit, offset]
     );
     res.status(200).json({ success: true, data: result.rows });
   } catch (error) {
@@ -753,12 +751,12 @@ export const updateOrderStatus = async (req, res) => {
       [order_id, changed_by, status, notes || `Order status updated to ${status}`]
     );
 
+    await client.query('COMMIT');
+
     // 3. Handle Shiprocket Cancellation if applicable
     if (status === 'Cancelled') {
       await cancelShipment(order_id);
     }
-
-    await client.query('COMMIT');
 
     // 5. Create Notifications (Customer, Sellers, and Admin)
     // Run outside main status transaction so notification queries see the committed data

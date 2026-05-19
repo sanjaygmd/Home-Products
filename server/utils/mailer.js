@@ -37,7 +37,7 @@ export const sendAdminPasswordResetEmail = async (email, name, newPassword) => {
           </p>
           
           <div style="margin: 25px 0; padding: 15px; background-color: #ffffff; border: 1.5px dashed #cbd5e1; border-radius: 8px; text-align: center;">
-            <p style="margin: 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: bold;">Verification Code</p>
+            <p style="margin: 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: bold;">Password Reset Code</p>
             <p style="margin: 10px 0 0 0; font-size: 32px; color: #2563eb; font-family: monospace; font-weight: bold; letter-spacing: 4px;">${newPassword}</p>
           </div>
           

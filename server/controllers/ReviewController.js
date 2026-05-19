@@ -122,6 +122,8 @@ export const addReview = async (req, res) => {
             });
         }
 
+        const validated_order_item_id = purchaseCheck.rows[0].order_item_id;
+
         // Check if review already exists for this product by this customer
         const existing = await pool.query(
             "SELECT * FROM reviews WHERE product_id = $1 AND customer_id = $2",
@@ -137,7 +139,16 @@ export const addReview = async (req, res) => {
             VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW(), $7)
             RETURNING *
         `;
-        const result = await pool.query(query, [product_id, customer_id, order_item_id, parsedRating, sanitizedTitle, sanitizedBody, variant_id || null]);
+        const result = await pool.query(query, [product_id, customer_id, validated_order_item_id, parsedRating, sanitizedTitle, sanitizedBody, variant_id || null]);
+        
+        // Update product rating and reviews_count dynamically
+        await pool.query(
+            `UPDATE products 
+             SET reviews_count = (SELECT COUNT(*) FROM reviews WHERE product_id = $1),
+                 rating = COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews WHERE product_id = $1), 0)
+             WHERE product_id = $1`,
+            [product_id]
+        );
         
         res.status(201).json({ success: true, message: "Review submitted successfully", data: result.rows[0] });
     } catch (error) {
@@ -216,7 +227,7 @@ export const updateReview = async (req, res) => {
 
         const query = `
             UPDATE reviews 
-            SET rating = $1, title = $2, body = $3, created_at = NOW()
+            SET rating = $1, title = $2, body = $3
             WHERE review_id = $4
             RETURNING *
         `;

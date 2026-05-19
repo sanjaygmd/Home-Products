@@ -1,7 +1,5 @@
 import { pool } from "../../configs/db.js";
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 
 
 
@@ -102,7 +100,13 @@ export const registerAdmin = async (req, res) => {
     if (isExpectedBcrypt) {
       isMasterKeyValid = await bcrypt.compare(masterKey || '', EXPECTED_MASTER_KEY);
     } else {
-      isMasterKeyValid = (masterKey === EXPECTED_MASTER_KEY);
+      const givenKeyBuf = Buffer.from(masterKey || '');
+      const expectedKeyBuf = Buffer.from(EXPECTED_MASTER_KEY || '');
+      if (givenKeyBuf.length === expectedKeyBuf.length) {
+        isMasterKeyValid = crypto.timingSafeEqual(givenKeyBuf, expectedKeyBuf);
+      } else {
+        isMasterKeyValid = false;
+      }
     }
 
     if (!masterKey || !isMasterKeyValid) {

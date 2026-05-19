@@ -1,6 +1,6 @@
 import { pool } from '../configs/db.js';
 import dotenv from 'dotenv';
-dotenv.config();
+
 import express from 'express';
 import {
   customerOnboarding,

@@ -74,7 +74,7 @@ export const sendOrderStatusNotifications = async (orderId, newStatus, client = 
         }
 
         // 6. Insert Global Admin Notification (Avoid orphan by finding a super admin)
-        const adminRes = await client.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
+        const adminRes = await pool.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
         const adminId = adminRes.rows.length > 0 ? adminRes.rows[0].admin_id : null;
 
         if (adminId) {
