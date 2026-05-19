@@ -183,6 +183,9 @@ export const addProduct = async (req, res) => {
             client.release();
         }
     } catch (error) {
+        if (error.code === '23505' && error.constraint === 'products_slug_key') {
+            return res.status(400).json({ success: false, message: 'A product with this name or slug already exists. Please choose a unique name or provide a custom slug.' });
+        }
         console.error("ADD PRODUCT ERROR:", error);
         return res.status(500).json({
             success: false,

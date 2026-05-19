@@ -65,16 +65,20 @@ export const updateAdminSettings = async (req, res) => {
 
 export const getAdminNotifications = async (req, res) => {
     const { adminId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
     if (req.user.type !== 'super_admin' && req.user.id !== adminId) {
         return res.status(403).json({ success: false, message: "Unauthorized: You can only access your own notifications." });
     }
 
     try {
         const result = await pool.query(
-            "SELECT * FROM notifications WHERE admin_id = $1 OR admin_id IS NULL ORDER BY created_at DESC LIMIT 50",
-            [adminId]
+            "SELECT * FROM notifications WHERE admin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            [adminId, limit, offset]
         );
-        res.status(200).json({ success: true, data: result.rows });
+        res.status(200).json({ success: true, data: result.rows, pagination: { page, limit } });
     } catch (error) {
         console.error('GET NOTIFICATIONS ERROR:', error);
         res.status(500).json({ success: false, message: "Error fetching notifications" });

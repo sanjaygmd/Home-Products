@@ -12,10 +12,10 @@ export const getSellerEarningsSummary = async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT 
-                COALESCE(SUM(CASE WHEN LOWER(sc.status) = 'pending' AND o.order_status = 'Delivered' THEN sc.seller_earnings ELSE 0 END), 0) as withdrawable_balance,
-                COALESCE(SUM(CASE WHEN LOWER(sc.status) = 'pending' AND o.order_status != 'Delivered' THEN sc.seller_earnings ELSE 0 END), 0) as pending_delivery,
-                COALESCE(SUM(CASE WHEN LOWER(sc.status) = 'processing' THEN sc.seller_earnings ELSE 0 END), 0) as processing_payouts,
-                COALESCE(SUM(CASE WHEN LOWER(sc.status) = 'paid' THEN sc.seller_earnings ELSE 0 END), 0) as paid_earnings,
+                COALESCE(SUM(CASE WHEN sc.status = 'pending' AND o.order_status = 'Delivered' THEN sc.seller_earnings ELSE 0 END), 0) as withdrawable_balance,
+                COALESCE(SUM(CASE WHEN sc.status = 'pending' AND o.order_status != 'Delivered' THEN sc.seller_earnings ELSE 0 END), 0) as pending_delivery,
+                COALESCE(SUM(CASE WHEN sc.status = 'processing' THEN sc.seller_earnings ELSE 0 END), 0) as processing_payouts,
+                COALESCE(SUM(CASE WHEN sc.status = 'paid' THEN sc.seller_earnings ELSE 0 END), 0) as paid_earnings,
                 COALESCE(SUM(sc.seller_earnings), 0) as total_earnings
             FROM seller_commissions sc
             JOIN orders o ON sc.order_id = o.order_id
@@ -64,7 +64,7 @@ export const getPendingCommissions = async (req, res) => {
             SELECT sc.* FROM seller_commissions sc
             JOIN orders o ON sc.order_id = o.order_id
             WHERE sc.seller_id = $1 
-            AND LOWER(sc.status) = 'pending' 
+            AND sc.status = 'pending' 
             AND o.order_status = 'Delivered'
             ORDER BY sc.created_at ASC
         `, [sellerId]);
@@ -112,7 +112,7 @@ export const requestPayout = async (req, res) => {
             FROM seller_commissions sc
             JOIN orders o ON sc.order_id = o.order_id
             WHERE sc.seller_id = $1 
-            AND LOWER(sc.status) = 'pending'
+            AND sc.status = 'pending'
             AND o.order_status = 'Delivered'
             FOR UPDATE
         `, [seller_id]);
@@ -141,7 +141,7 @@ export const requestPayout = async (req, res) => {
             SET status = 'processing',
                 payout_id = $1::uuid
             WHERE seller_id = $2::uuid 
-            AND LOWER(status) = 'pending' 
+            AND status = 'pending' 
             AND order_id IN (SELECT order_id FROM orders WHERE order_status = 'Delivered')
         `, [payoutId, seller_id]);
 
@@ -202,6 +202,11 @@ export const getAllPayouts = async (req, res) => {
 export const updatePayoutStatus = async (req, res) => {
     const { payout_id } = req.params;
     const { status, admin_id, transaction_ref, notes } = req.body;
+
+    const allowedStatuses = ['Paid', 'Rejected', 'Processing'];
+    if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ success: false, message: "Invalid status value provided" });
+    }
 
     const client = await pool.connect();
     try {
@@ -313,12 +318,12 @@ export const initiatePayout = async (req, res) => {
 
         const payoutId = payoutRes.rows[0].payout_id;
 
-        // 2. Update the commissions to 'Paid'
+        // 2. Update the commissions to 'paid'
         await client.query(`
             UPDATE seller_commissions 
-            SET status = 'Paid' 
+            SET status = 'paid' 
             WHERE seller_id = $1 
-            AND (status = 'Pending' OR status = 'Processing')
+            AND (status = 'pending' OR status = 'processing')
             AND created_at >= $2 
             AND created_at <= $3
         `, [seller_id, payout_period_start, payout_period_end]);
@@ -353,7 +358,7 @@ export const processAutoPayout = async (orderId) => {
         const commissionsRes = await client.query(`
             SELECT seller_id, SUM(seller_earnings) as amount, MIN(created_at) as min_date, MAX(created_at) as max_date
             FROM seller_commissions 
-            WHERE order_id = $1 AND LOWER(status) = 'pending'
+            WHERE order_id = $1 AND status = 'pending'
             GROUP BY seller_id
         `, [orderId]);
 
@@ -372,8 +377,8 @@ export const processAutoPayout = async (orderId) => {
             // 3. Update commissions to 'Paid'
             await client.query(`
                 UPDATE seller_commissions 
-                SET status = 'Paid' 
-                WHERE order_id = $1 AND seller_id = $2 AND LOWER(status) = 'pending'
+                SET status = 'paid' 
+                WHERE order_id = $1 AND seller_id = $2 AND status = 'pending'
             `, [orderId, seller_id]);
 
             // 4. Log to finance transactions

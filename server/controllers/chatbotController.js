@@ -1,5 +1,6 @@
 import { pool } from '../configs/db.js';
 import crypto from 'crypto';
+import { sanitizeText } from '../utils/sanitizer.js';
 
 // Dynamic Gemini Client Loader to prevent startup crashes if package is missing or API key is absent
 let genAI = null;
@@ -25,13 +26,15 @@ const getGeminiClient = async () => {
  */
 export const handleChatMessage = async (req, res, next) => {
     try {
-        const { message, history = [] } = req.body;
+        let { message, history = [] } = req.body;
+
+        message = sanitizeText(message);
 
         if (!message || typeof message !== 'string') {
-            return res.status(400).json({ success: false, message: "Message is required and must be a string." });
+            return res.status(400).json({ success: false, message: "Message is required and must be a valid string." });
         }
 
-        if (message.trim().length > 500) {
+        if (message.length > 500) {
             return res.status(400).json({ success: false, message: "Message exceeds maximum length of 500 characters." });
         }
 

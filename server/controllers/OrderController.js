@@ -233,7 +233,7 @@ export const createOrder = async (req, res) => {
     let validatedCouponId = null;
     if (coupon_id && coupon_id !== 'null' && coupon_id !== 'undefined') {
       const couponCheck = await client.query(
-        "SELECT type, discount_percent, discount_amount, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 AND is_active = true AND (valid_until IS NULL OR valid_until > NOW()) FOR UPDATE",
+        "SELECT type, discount_percent, discount_amount, max_discount, min_order_value, max_usage, used_count FROM coupons WHERE coupon_id = $1 AND is_active = true AND (valid_until IS NULL OR (valid_until + interval '23 hours 59 minutes 59 seconds') >= NOW()) FOR UPDATE",
         [coupon_id]
       );
 
@@ -305,6 +305,7 @@ export const createOrder = async (req, res) => {
         [order_id, item.product_id, item.variant_id, item.seller_id, item.quantity, item.unit_price, item.total_price]
       );
       const order_item_id = orderItemRes.rows[0].order_item_id;
+      item.order_item_id = order_item_id;
 
       const sale_amount = item.total_price;
       const commission_rate = item.commission_rate;
@@ -330,10 +331,11 @@ export const createOrder = async (req, res) => {
       
       const maxFee = Math.min(sellerPlatformFee, sellerTotalEarnings[seller_id] || 0);
       if (maxFee > 0) {
+        const firstSellerItem = processedItems.find(i => i.seller_id === seller_id);
         await client.query(
           `INSERT INTO seller_commissions (commission_id, order_id, order_item_id, seller_id, sale_amount, commission_rate, commission_amount, seller_earnings, status)
-           VALUES (gen_random_uuid(), $1, NULL, $2, 0, 0, $3, $4, 'pending')`,
-          [order_id, seller_id, maxFee, -maxFee]
+           VALUES (gen_random_uuid(), $1, $2, $3, 0, 0, $4, $5, 'pending')`,
+          [order_id, firstSellerItem ? firstSellerItem.order_item_id : null, seller_id, maxFee, -maxFee]
         );
       }
 

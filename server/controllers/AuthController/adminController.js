@@ -374,7 +374,7 @@ export const logoutAdmin = async (req, res) => {
     let sessionId = req.sessionId;
     
     if (!sessionId && req.cookies) {
-      const token = req.cookies.admin_token || req.cookies.token;
+      const token = req.cookies.admin_token || req.cookies.customer_token || req.cookies.seller_token || req.cookies.super_admin_token || req.cookies.token;
       if (token) {
         const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
         const sessionRes = await pool.query(

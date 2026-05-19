@@ -3,6 +3,9 @@ import { pool } from '../configs/db.js';
 // Get notifications for a customer
 export const getCustomerNotifications = async (req, res) => {
     const { customerId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
 
     // Ownership Check
     if (req.user.id !== customerId && !['admin', 'super_admin'].includes(req.user.type)) {
@@ -11,10 +14,10 @@ export const getCustomerNotifications = async (req, res) => {
 
     try {
         const result = await pool.query(
-            "SELECT * FROM notifications WHERE customer_id = $1 AND seller_id IS NULL ORDER BY created_at DESC LIMIT 50",
-            [customerId]
+            "SELECT * FROM notifications WHERE customer_id = $1 AND seller_id IS NULL ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            [customerId, limit, offset]
         );
-        res.status(200).json({ success: true, data: result.rows });
+        res.status(200).json({ success: true, data: result.rows, pagination: { page, limit } });
     } catch (error) {
         console.error('FETCH NOTIFICATIONS ERROR:', error);
         res.status(500).json({ success: false, message: "Error fetching notifications" });

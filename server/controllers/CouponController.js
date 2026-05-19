@@ -71,10 +71,11 @@ export const validateCoupon = async (req, res) => {
         }
 
         // Check if customer already used this coupon (Individual)
-        if (req.user && req.user.id) {
+        const checkCustomerId = (req.user && req.user.id) || req.body.customer_id;
+        if (checkCustomerId) {
             const usageCheck = await client.query(
                 "SELECT 1 FROM coupon_usage WHERE coupon_id = $1 AND customer_id = $2",
-                [coupon.coupon_id, req.user.id]
+                [coupon.coupon_id, checkCustomerId]
             );
             if (usageCheck.rows.length > 0) {
                 await client.query('ROLLBACK');
