@@ -296,6 +296,7 @@ export const createOrder = async (req, res) => {
     );
 
     // 7. Insert processed items and commissions
+    const sellerTotalEarnings = {};
     for (const item of processedItems) {
       const orderItemRes = await client.query(
         `INSERT INTO order_items (order_item_id, order_id, product_id, variant_id, seller_id, quantity, unit_price, total_price, item_status)
@@ -307,12 +308,14 @@ export const createOrder = async (req, res) => {
 
       const sale_amount = item.total_price;
       const commission_rate = item.commission_rate;
-      const commission_amount = (sale_amount * commission_rate) + sellerPlatformFee;
+      const commission_amount = sale_amount * commission_rate;
       const seller_earnings = sale_amount - commission_amount;
+      
+      sellerTotalEarnings[item.seller_id] = (sellerTotalEarnings[item.seller_id] || 0) + seller_earnings;
 
       await client.query(
         `INSERT INTO seller_commissions (commission_id, order_id, order_item_id, seller_id, sale_amount, commission_rate, commission_amount, seller_earnings, status)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'Pending')`,
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending')`,
         [order_id, order_item_id, item.seller_id, sale_amount, commission_rate, commission_amount, seller_earnings]
       );
     }
@@ -324,6 +327,15 @@ export const createOrder = async (req, res) => {
          VALUES (gen_random_uuid(), $1, $2, $3)`,
         [order_id, seller_id, sellerSubtotals[seller_id]]
       );
+      
+      const maxFee = Math.min(sellerPlatformFee, sellerTotalEarnings[seller_id] || 0);
+      if (maxFee > 0) {
+        await client.query(
+          `INSERT INTO seller_commissions (commission_id, order_id, order_item_id, seller_id, sale_amount, commission_rate, commission_amount, seller_earnings, status)
+           VALUES (gen_random_uuid(), $1, NULL, $2, 0, 0, $3, $4, 'pending')`,
+          [order_id, seller_id, maxFee, -maxFee]
+        );
+      }
 
       await client.query(
         `INSERT INTO notifications (notification_id, customer_id, seller_id, order_id, is_read, type, message, created_at)

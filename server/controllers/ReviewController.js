@@ -232,6 +232,18 @@ export const updateReview = async (req, res) => {
             RETURNING *
         `;
         const result = await pool.query(query, [parsedRating, sanitizedTitle, sanitizedBody, id]);
+        
+        if (result.rows.length > 0) {
+            const product_id = result.rows[0].product_id;
+            await pool.query(
+                `UPDATE products 
+                 SET reviews_count = (SELECT COUNT(*) FROM reviews WHERE product_id = $1),
+                     rating = COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews WHERE product_id = $1), 0)
+                 WHERE product_id = $1`,
+                [product_id]
+            );
+        }
+        
         res.status(200).json({ success: true, message: "Review updated successfully", data: result.rows[0] });
     } catch (error) {
         console.error('UPDATE REVIEW ERROR:', error);

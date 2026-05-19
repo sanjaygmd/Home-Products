@@ -114,6 +114,7 @@ export const requestPayout = async (req, res) => {
             WHERE sc.seller_id = $1 
             AND LOWER(sc.status) = 'pending'
             AND o.order_status = 'Delivered'
+            FOR UPDATE
         `, [seller_id]);
 
         const amount = parseFloat(balanceRes.rows[0].balance);
@@ -154,11 +155,16 @@ export const requestPayout = async (req, res) => {
             VALUES (gen_random_uuid(), $1, NULL, NULL, NULL, 'payout_request', $2, false, NOW())
         `, [seller_id, `Your payout request of ₹${Number(amount).toLocaleString('en-IN')} has been successfully submitted to the admin for approval.`]);
 
-        // 6. Insert Notification for Admin (admin_id is NULL so all admins see it)
-        await client.query(`
-            INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
-            VALUES (gen_random_uuid(), NULL, NULL, NULL, NULL, 'payout_request', $1, false, NOW())
-        `, [`New payout requested by "${storeName}" for ₹${Number(amount).toLocaleString('en-IN')}.`]);
+        // 6. Insert Notification for Admin
+        const adminRes = await pool.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
+        const adminId = adminRes.rows.length > 0 ? adminRes.rows[0].admin_id : null;
+
+        if (adminId) {
+            await client.query(`
+                INSERT INTO notifications (notification_id, seller_id, admin_id, customer_id, order_id, type, message, is_read, created_at)
+                VALUES (gen_random_uuid(), NULL, $1, NULL, NULL, 'payout_request', $2, false, NOW())
+            `, [adminId, `New payout requested by "${storeName}" for ₹${Number(amount).toLocaleString('en-IN')}.`]);
+        }
 
         await client.query('COMMIT');
         res.status(200).json({ success: true, message: "Payout request submitted successfully", payout_id: payoutId });

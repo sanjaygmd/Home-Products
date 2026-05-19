@@ -104,6 +104,31 @@ export const runSchemaMigrations = async () => {
         CREATE INDEX IF NOT EXISTS idx_chatbot_history_session_id ON chatbot_history(session_id);
     `);
 
+    // 10. Ensure orphaned_payments table exists for webhook fallbacks
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS orphaned_payments (
+            payment_id CHARACTER VARYING(255) PRIMARY KEY,
+            razorpay_order_id CHARACTER VARYING(255),
+            amount NUMERIC(12,2),
+            status CHARACTER VARYING(50),
+            notes TEXT,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    // 11. Fix inconsistent casing in seller_commissions status
+    await pool.query(`UPDATE seller_commissions SET status = LOWER(status)`);
+    try {
+        await pool.query(`
+            ALTER TABLE seller_commissions 
+            ADD CONSTRAINT chk_status_lower CHECK (status = LOWER(status))
+        `);
+    } catch (err) {
+        if (!err.message.includes('already exists')) {
+            console.warn("[MIGRATOR] Warning when adding chk_status_lower constraint:", err.message);
+        }
+    }
+
     console.log("[MIGRATOR] All schema migrations ran successfully.");
   } catch (err) {
     console.error("[MIGRATOR] Schema migrations FAILED:", err.message);

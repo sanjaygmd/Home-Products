@@ -97,7 +97,7 @@ export const addProduct = async (req, res) => {
                 height || 0,
                 cleanBrand,
                 (images && images.length > 0) ? images.map(img => typeof img === 'string' ? img : img.url) : [],
-                slug || cleanName.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
+                slug || cleanName.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
                 cleanColor,
                 cleanSize,
                 cleanRoom,

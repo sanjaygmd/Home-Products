@@ -23,7 +23,7 @@ const saveOtp = async (email, type, otp, expires, metadata = {}) => {
     `INSERT INTO persistent_otps (email, otp_type, otp_code, attempts, expires_at, metadata)
      VALUES ($1, $2, $3, 0, $4, $5)
      ON CONFLICT (email, otp_type) 
-     DO UPDATE SET otp_code = $3, attempts = 0, expires_at = $4, metadata = $5, created_at = NOW()`,
+     DO UPDATE SET otp_code = $3, attempts = persistent_otps.attempts, expires_at = $4, metadata = $5, created_at = NOW()`,
     [email, type, hashedOtp, new Date(expires), JSON.stringify(metadata)]
   );
 };
