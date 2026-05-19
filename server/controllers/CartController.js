@@ -97,10 +97,9 @@ export const getCart = async (req, res) => {
 
 // POST /cart/add
 export const addToCart = async (req, res) => {
-    let { customer_id, product_id, variant_id, quantity, price } = req.body;
+    let { customer_id, product_id, variant_id, quantity } = req.body;
     
     quantity = parseInt(quantity) || 1;
-    price = parseFloat(price);
 
     if (!customer_id || !product_id) {
         return res.status(400).json({ success: false, message: 'customer_id and product_id are required' });
@@ -365,7 +364,7 @@ export const updateCartItem = async (req, res) => {
         await client.query('COMMIT');
         return res.status(200).json({ 
             success: true, 
-            message: quantity <= 0 ? 'Item removed from cart' : 'Cart item updated' 
+            message: qty <= 0 ? 'Item removed from cart' : 'Cart item updated' 
         });
     } catch (error) {
         await client.query('ROLLBACK');

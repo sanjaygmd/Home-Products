@@ -14,12 +14,6 @@ const CheckoutPage = () => {
   const { cart } = useContext(CartContext);
   const { currentUser } = useAuth();
 
-  useEffect(() => {
-    if (!currentUser || currentUser.role !== 'customer') {
-      navigate("/customer-login");
-    }
-  }, [currentUser, navigate]);
-
 
   const [step, setStep] = useState(1);
   const [userDetails, setUserDetails] = useState(null);

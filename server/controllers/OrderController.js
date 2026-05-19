@@ -101,6 +101,8 @@ export const createOrder = async (req, res) => {
       }
     }
 
+    await client.query('BEGIN');
+
     // 1. Get or Create Address ID
     if (!address_id) {
       const addrRes = await client.query(
@@ -111,8 +113,6 @@ export const createOrder = async (req, res) => {
       );
       address_id = addrRes.rows[0].address_id;
     }
-
-    await client.query('BEGIN');
 
     // 2. Fetch platform fees from admin_settings (Pattern from Gift Ecommerce)
     let customerPlatformFee = 10.00;
@@ -425,7 +425,15 @@ export const getMyOrders = async (req, res) => {
   try {
     const { customer_id: paramId } = req.params;
     const { limit = 20, page = 1 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    
+    const parsedLimit = parseInt(limit);
+    const parsedPage = parseInt(page);
+    
+    if (isNaN(parsedLimit) || parsedLimit <= 0 || isNaN(parsedPage) || parsedPage <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid pagination parameters" });
+    }
+
+    const offset = (parsedPage - 1) * parsedLimit;
     
     const isRestricted = req.user.type === 'customer';
     const customer_id = isRestricted ? req.user.id : (paramId || req.user.id);
@@ -690,15 +698,18 @@ export const updateOrderStatus = async (req, res) => {
       // Update daily_finances to subtract revenue
       const orderInfo = await client.query("SELECT DATE(placed_at) as date FROM orders WHERE order_id = $1", [order_id]);
       if (orderInfo.rows.length > 0) {
-        const sellerSubtotals = await client.query("SELECT seller_id, seller_subtotal FROM order_sellers WHERE order_id = $1", [order_id]);
-        for (const s of sellerSubtotals.rows) {
+        const sellerCommissions = await client.query(
+            "SELECT seller_id, SUM(sale_amount) as total_sale, SUM(commission_amount) as total_comm, SUM(seller_earnings) as total_earn FROM seller_commissions WHERE order_id = $1 GROUP BY seller_id", 
+            [order_id]
+        );
+        for (const s of sellerCommissions.rows) {
           await client.query(`
                         UPDATE daily_finances 
                         SET total_revenue = total_revenue - $1, 
-                            platform_commission = platform_commission - ($1 * 0.1), 
-                            net_seller_earnings = net_seller_earnings - ($1 * 0.9)
-                        WHERE seller_id = $2 AND date = $3
-                    `, [s.seller_subtotal, s.seller_id, orderInfo.rows[0].date]);
+                            platform_commission = platform_commission - $2, 
+                            net_seller_earnings = net_seller_earnings - $3
+                        WHERE seller_id = $4 AND date = $5
+                    `, [s.total_sale, s.total_comm, s.total_earn, s.seller_id, orderInfo.rows[0].date]);
         }
       }
 
@@ -742,22 +753,18 @@ export const updateOrderStatus = async (req, res) => {
       [order_id, changed_by, status, notes || `Order status updated to ${status}`]
     );
 
-    // 5. Create Notifications (Customer, Sellers, and Admin)
-    // Run outside main status transaction to prevent notification failure from rolling back status change
-    sendOrderStatusNotifications(order_id, status, pool, courier, tracking_id).catch(err => {
-        console.error(`[NOTIFY ERROR] Order ${order_id} status updated to ${status}, but notification failed:`, err.message);
-    });
+    // 3. Handle Shiprocket Cancellation if applicable
+    if (status === 'Cancelled') {
+      await cancelShipment(order_id);
+    }
 
     await client.query('COMMIT');
 
-    // 3. Handle Shiprocket Cancellation if applicable (Moved outside transaction)
-    if (status === 'Cancelled') {
-      try {
-        await cancelShipment(order_id);
-      } catch (srErr) {
-        console.error(`[SHIPROCKET CANCEL ERROR] Order ${order_id}:`, srErr.message);
-      }
-    }
+    // 5. Create Notifications (Customer, Sellers, and Admin)
+    // Run outside main status transaction so notification queries see the committed data
+    sendOrderStatusNotifications(order_id, status, pool, courier, tracking_id).catch(err => {
+        console.error(`[NOTIFY ERROR] Order ${order_id} status updated to ${status}, but notification failed:`, err.message);
+    });
 
     res.status(200).json({ success: true, message: "Order status updated successfully" });
   } catch (error) {
@@ -851,14 +858,16 @@ export const createReturnRequest = async (req, res) => {
     );
 
     // 4. Create notification for admin (find first super admin to avoid orphan)
-    const adminRes = await client.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
+    const adminRes = await pool.query("SELECT admin_id FROM admins WHERE role = 'super_admin' LIMIT 1");
     const adminId = adminRes.rows.length > 0 ? adminRes.rows[0].admin_id : null;
 
-    await client.query(
-      `INSERT INTO notifications (notification_id, admin_id, type, message, created_at, is_read)
-             VALUES (gen_random_uuid(), $1, 'return_request', $2, NOW(), false)`,
-      [adminId, `New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
-    );
+    if (adminId) {
+      await client.query(
+        `INSERT INTO notifications (notification_id, admin_id, type, message, created_at, is_read)
+               VALUES (gen_random_uuid(), $1, 'return_request', $2, NOW(), false)`,
+        [adminId, `New Return Request #${return_request_id.slice(0, 8).toUpperCase()} received for Order #${order_id.slice(0, 8).toUpperCase()}`]
+      );
+    }
 
     await client.query('COMMIT');
     res.status(201).json({ success: true, message: "Return request submitted successfully.", return_id: return_request_id });

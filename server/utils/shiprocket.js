@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-dotenv.config();
+
 
 const BASE_URL = 'https://apiv2.shiprocket.in/v1/external';
 

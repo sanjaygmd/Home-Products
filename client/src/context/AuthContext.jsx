@@ -29,18 +29,12 @@ export function AuthProvider({ children }) {
     const { token, ...userWithoutToken } = user;
     const formattedUser = { ...userWithoutToken, role };
     setCurrentUser(formattedUser);
-    localStorage.setItem('user', JSON.stringify(formattedUser));
-    localStorage.setItem('auth', 'true');
-    localStorage.removeItem('seller'); // Isolate contexts
   };
 
   const loginSeller = (sellerData) => {
     const { token, ...sellerWithoutToken } = sellerData;
     const formattedSeller = { ...sellerWithoutToken, role: 'seller' };
     setCurrentUser(formattedSeller);
-    localStorage.setItem('seller', JSON.stringify(formattedSeller));
-    localStorage.removeItem('user'); // Isolate contexts
-    localStorage.removeItem('auth');
   };
 
   const loginAdmin = (adminData) => {
@@ -48,21 +42,11 @@ export function AuthProvider({ children }) {
     const role = adminData.role || 'admin';
     const formattedAdmin = { ...adminWithoutToken, role };
     setCurrentUser(formattedAdmin);
-    localStorage.setItem('admin', JSON.stringify(formattedAdmin));
-    localStorage.removeItem('user'); // Isolate contexts
-    localStorage.removeItem('seller');
-    localStorage.removeItem('auth');
   };
 
   const logoutUser = async () => {
     try {
-      let role = currentUser?.role;
-      if (!role) {
-        // Fallback: Determine role from localStorage if currentUser is already null
-        if (localStorage.getItem('admin')) role = 'admin';
-        else if (localStorage.getItem('seller')) role = 'seller';
-        else if (localStorage.getItem('user')) role = 'customer';
-      }
+      let role = currentUser?.role || 'customer';
       await authServiceLogout(role);
     } catch (error) {
       console.error("Logout error:", error);

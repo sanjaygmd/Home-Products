@@ -154,6 +154,12 @@ const registerLimiter = rateLimit({
     message: { success: false, message: "Too many registration attempts from this IP, please try again after an hour." }
 });
 
+const razorpayOrderLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    message: { success: false, message: "Too many order creation requests. Please try again after 15 minutes." }
+});
+
 // Apply rate limiters to specific routes
 app.use('/user/customer/register', registerLimiter);
 app.use('/user/seller/register', registerLimiter);
@@ -168,6 +174,7 @@ app.use('/user/seller/send-otp', otpLimiter);
 app.use('/user/customer/verify-otp', otpLimiter); // Protect verification from brute-force
 app.use('/user/seller/verify-otp', otpLimiter);
 app.use('/user/admin/verify-password-reset', otpLimiter);
+app.use('/orders/razorpay/create-order', razorpayOrderLimiter);
 
 app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), handleRazorpayWebhook);
 
